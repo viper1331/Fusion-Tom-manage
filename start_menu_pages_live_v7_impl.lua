@@ -524,12 +524,16 @@ local function loadPng(path)
     return nil, err
   end
 
-  local ok, img = pcall(function()
+  local ok, img, decodeErr = pcall(function()
     return gpu.decodeImage(table.unpack(bytes))
   end)
 
   if not ok then
     return nil, img
+  end
+
+  if not img then
+    return nil, decodeErr or ("decode failed (nil image): " .. tostring(path))
   end
 
   return img
@@ -681,47 +685,109 @@ local function buildTierVariantMap(variants, kindLabel)
   return map
 end
 
-local function buildTierFallbackOrder(preferredTier)
-  local order = {}
-  local preferredIndex = ASSET_TIER_INDEX[preferredTier] or ASSET_TIER_INDEX.small2
-
-  for index = preferredIndex, 1, -1 do
-    order[#order + 1] = ASSET_TIER_ORDER[index]
+local function addTierCandidate(out, seen, tierMap, tier, reason)
+  if not tier or seen[tier] then
+    return
   end
-  for index = preferredIndex + 1, #ASSET_TIER_ORDER do
-    order[#order + 1] = ASSET_TIER_ORDER[index]
+  local variants = tierMap[tier]
+  if not variants or #variants < 1 then
+    return
   end
-
-  return order
+  out[#out + 1] = {
+    tier = tier,
+    reason = reason or "fallback",
+  }
+  seen[tier] = true
 end
 
-local function buildNearestTierOrder(targetTier, tierMap)
-  local order = {}
-  local targetIndex = ASSET_TIER_INDEX[targetTier] or ASSET_TIER_INDEX.small2
+local function buildReactorTierCandidates(preferredTier, reactorByTier)
+  local out = {}
   local seen = {}
+  local preferredIndex = ASSET_TIER_INDEX[preferredTier] or ASSET_TIER_INDEX.small2
 
-  for delta = 0, #ASSET_TIER_ORDER do
-    local lowerIndex = targetIndex - delta
-    local higherIndex = targetIndex + delta
+  addTierCandidate(out, seen, reactorByTier, ASSET_TIER_ORDER[preferredIndex], "exact")
+  addTierCandidate(out, seen, reactorByTier, ASSET_TIER_ORDER[preferredIndex - 1], "nearest")
+  addTierCandidate(out, seen, reactorByTier, ASSET_TIER_ORDER[preferredIndex + 1], "nearest")
 
-    if lowerIndex >= 1 then
-      local lowerTier = ASSET_TIER_ORDER[lowerIndex]
-      if tierMap[lowerTier] and not seen[lowerTier] then
-        order[#order + 1] = lowerTier
-        seen[lowerTier] = true
-      end
-    end
+  for index = preferredIndex - 2, 1, -1 do
+    addTierCandidate(out, seen, reactorByTier, ASSET_TIER_ORDER[index], "lower_fallback")
+  end
+  for index = preferredIndex + 2, #ASSET_TIER_ORDER do
+    addTierCandidate(out, seen, reactorByTier, ASSET_TIER_ORDER[index], "upper_fallback")
+  end
 
-    if delta > 0 and higherIndex <= #ASSET_TIER_ORDER then
-      local higherTier = ASSET_TIER_ORDER[higherIndex]
-      if tierMap[higherTier] and not seen[higherTier] then
-        order[#order + 1] = higherTier
-        seen[higherTier] = true
-      end
+  return out
+end
+
+local function buildModuleTierCandidates(reactorTier, moduleByTier)
+  local out = {}
+  local seen = {}
+  local reactorIndex = ASSET_TIER_INDEX[reactorTier] or ASSET_TIER_INDEX.small2
+
+  addTierCandidate(out, seen, moduleByTier, ASSET_TIER_ORDER[reactorIndex], "exact")
+  addTierCandidate(out, seen, moduleByTier, ASSET_TIER_ORDER[reactorIndex - 1], "nearest")
+  addTierCandidate(out, seen, moduleByTier, ASSET_TIER_ORDER[reactorIndex + 1], "nearest")
+
+  for index = reactorIndex - 2, 1, -1 do
+    addTierCandidate(out, seen, moduleByTier, ASSET_TIER_ORDER[index], "lower_fallback")
+  end
+  for index = reactorIndex + 2, #ASSET_TIER_ORDER do
+    addTierCandidate(out, seen, moduleByTier, ASSET_TIER_ORDER[index], "upper_fallback")
+  end
+
+  return out
+end
+
+local function buildTierPairCandidates(preferredTier, reactorByTier, moduleByTier)
+  local out = {}
+  local reactorCandidates = buildReactorTierCandidates(preferredTier, reactorByTier)
+
+  for _, reactorCandidate in ipairs(reactorCandidates) do
+    local moduleCandidates = buildModuleTierCandidates(reactorCandidate.tier, moduleByTier)
+    for _, moduleCandidate in ipairs(moduleCandidates) do
+      out[#out + 1] = {
+        reactorTier = reactorCandidate.tier,
+        reactorReason = reactorCandidate.reason,
+        moduleTier = moduleCandidate.tier,
+        moduleReason = moduleCandidate.reason,
+        requestedModuleTier = reactorCandidate.tier,
+      }
     end
   end
 
-  return order
+  return out
+end
+
+local function isTierPairCompatible(reactorTier, moduleTier)
+  local reactorIndex = ASSET_TIER_INDEX[reactorTier] or 0
+  local moduleIndex = ASSET_TIER_INDEX[moduleTier] or 0
+  if reactorIndex == 0 or moduleIndex == 0 then
+    return false
+  end
+  return math.abs(reactorIndex - moduleIndex) <= 2
+end
+
+local function shouldReplaceReactorFallback(currentFallback, candidateFallback, preferredTier)
+  if not candidateFallback or not candidateFallback.reactor then
+    return false
+  end
+  if not currentFallback or not currentFallback.reactor then
+    return true
+  end
+
+  local preferredIndex = ASSET_TIER_INDEX[preferredTier] or ASSET_TIER_INDEX.small2
+  local currentIndex = ASSET_TIER_INDEX[currentFallback.reactorTier] or preferredIndex
+  local candidateIndex = ASSET_TIER_INDEX[candidateFallback.reactorTier] or preferredIndex
+
+  local currentDelta = math.abs(currentIndex - preferredIndex)
+  local candidateDelta = math.abs(candidateIndex - preferredIndex)
+  if candidateDelta ~= currentDelta then
+    return candidateDelta < currentDelta
+  end
+
+  local currentArea = (currentFallback.reactor.width or 0) * (currentFallback.reactor.height or 0)
+  local candidateArea = (candidateFallback.reactor.width or 0) * (candidateFallback.reactor.height or 0)
+  return candidateArea > currentArea
 end
 
 local function classifyAssetError(err)
@@ -792,68 +858,156 @@ local function loadScenePair(preferredTier)
     appendUiRuntimeLog("asset scene: no reactor tier available")
     return nil, "no_reactor_tier_available"
   end
-  if not hasModuleTier then
-    appendUiRuntimeLog("asset scene: no laser module tier available")
-    return nil, "no_module_tier_available"
+
+  local pairCandidates = buildTierPairCandidates(preferredTier, reactorByTier, moduleByTier)
+  appendUiRuntimeLog(
+    "asset scene: requestedReactorTier=" .. tostring(preferredTier)
+      .. " hasModuleTier=" .. tostring(hasModuleTier)
+      .. " pairCandidates=" .. tostring(#pairCandidates)
+  )
+
+  if #pairCandidates > 0 then
+    for index, candidate in ipairs(pairCandidates) do
+      appendUiRuntimeLog(
+        "asset pair candidate #" .. tostring(index)
+          .. ": reactorTier=" .. tostring(candidate.reactorTier)
+          .. " (" .. tostring(candidate.reactorReason) .. ")"
+          .. " moduleTierReq=" .. tostring(candidate.requestedModuleTier)
+          .. " moduleTier=" .. tostring(candidate.moduleTier)
+          .. " (" .. tostring(candidate.moduleReason) .. ")"
+      )
+    end
+  elseif not hasModuleTier then
+    appendUiRuntimeLog("asset scene: no module tier available, reactor-only fallback mode enabled")
   end
 
-  local sceneTierOrder = buildTierFallbackOrder(preferredTier)
-  appendUiRuntimeLog("asset scene: preferred tier=" .. tostring(preferredTier))
-
+  local reactorTierCandidates = buildReactorTierCandidates(preferredTier, reactorByTier)
   local sawVramError = false
+  local reactorFallback = nil
 
-  for _, reactorTier in ipairs(sceneTierOrder) do
-    local reactorList = reactorByTier[reactorTier]
-    if reactorList and #reactorList > 0 then
-      appendUiRuntimeLog("asset scene: try reactor tier=" .. tostring(reactorTier) .. " variants=" .. tostring(#reactorList))
+  for _, reactorCandidate in ipairs(reactorTierCandidates) do
+    local reactorTier = reactorCandidate.tier
+    local reactorList = reactorByTier[reactorTier] or {}
+    local moduleCandidates = buildModuleTierCandidates(reactorTier, moduleByTier)
+    appendUiRuntimeLog(
+      "asset scene: try reactorTier=" .. tostring(reactorTier)
+        .. " (" .. tostring(reactorCandidate.reason) .. ")"
+        .. " reactorVariants=" .. tostring(#reactorList)
+        .. " moduleCandidates=" .. tostring(#moduleCandidates)
+    )
 
-      for _, reactorVariant in ipairs(reactorList) do
-        local reactorSelected, reactorErrClass = tryDecodeVariant("reactor", reactorVariant)
-        if reactorSelected then
-          local moduleTierOrder = buildNearestTierOrder(reactorTier, moduleByTier)
-          appendUiRuntimeLog("asset scene: reactor " .. tostring(reactorSelected.name) .. " loaded, module tier candidates=" .. tostring(#moduleTierOrder))
+    for _, reactorVariant in ipairs(reactorList) do
+      local reactorSelected, reactorErrClass = tryDecodeVariant("reactor", reactorVariant)
+      if reactorSelected then
+        local fallbackCandidate = {
+          reactor = reactorSelected,
+          reactorTier = reactorTier,
+          requestedTier = preferredTier,
+        }
+        if shouldReplaceReactorFallback(reactorFallback, fallbackCandidate, preferredTier) then
+          reactorFallback = fallbackCandidate
+        end
 
-          for _, moduleTier in ipairs(moduleTierOrder) do
-            local moduleList = moduleByTier[moduleTier]
-            if moduleList and #moduleList > 0 then
-              for _, moduleVariant in ipairs(moduleList) do
-                local moduleSelected, moduleErrClass = tryDecodeVariant("laser_module", moduleVariant)
-                if moduleSelected then
-                  local usedFallback = (reactorTier ~= preferredTier) or (moduleTier ~= reactorTier)
-                  if moduleTier ~= reactorTier then
-                    appendUiRuntimeLog("asset scene: module exact tier missing, nearest used reactorTier=" .. tostring(reactorTier) .. " moduleTier=" .. tostring(moduleTier))
-                  end
+        for _, moduleCandidate in ipairs(moduleCandidates) do
+          local moduleTier = moduleCandidate.tier
+          local moduleList = moduleByTier[moduleTier] or {}
 
-                  return {
-                    reactor = reactorSelected,
-                    module = moduleSelected,
-                    reactorTier = reactorTier,
-                    moduleTier = moduleTier,
-                    requestedTier = preferredTier,
-                    usedFallback = usedFallback,
-                    sawVramError = sawVramError,
-                  }, nil
+          if not isTierPairCompatible(reactorTier, moduleTier) then
+            appendUiRuntimeLog(
+              "asset pair rejected: class=incompatible_pair"
+                .. " reactorTierReq=" .. tostring(preferredTier)
+                .. " reactorTier=" .. tostring(reactorTier)
+                .. " moduleTierReq=" .. tostring(reactorTier)
+                .. " moduleTier=" .. tostring(moduleTier)
+                .. " reactorVariant=" .. tostring(reactorVariant.name)
+            )
+          else
+            for _, moduleVariant in ipairs(moduleList) do
+              appendUiRuntimeLog(
+                "asset pair try: reactorTierReq=" .. tostring(preferredTier)
+                  .. " reactorTier=" .. tostring(reactorTier)
+                  .. " moduleTierReq=" .. tostring(reactorTier)
+                  .. " moduleTier=" .. tostring(moduleTier)
+                  .. " moduleReason=" .. tostring(moduleCandidate.reason)
+                  .. " reactorVariant=" .. tostring(reactorVariant.name)
+                  .. " moduleVariant=" .. tostring(moduleVariant.name)
+              )
+
+              local moduleSelected, moduleErrClass = tryDecodeVariant("laser_module", moduleVariant)
+              if moduleSelected then
+                local usedFallback = (reactorTier ~= preferredTier) or (moduleTier ~= reactorTier)
+                if moduleTier ~= reactorTier then
+                  appendUiRuntimeLog(
+                    "asset pair selected: module fallback chosen"
+                      .. " requested=" .. tostring(reactorTier)
+                      .. " selected=" .. tostring(moduleTier)
+                  )
                 end
 
-                if moduleErrClass == "vram_alloc_failed" then
-                  sawVramError = true
-                end
+                appendUiRuntimeLog(
+                  "asset pair selected: reactor=" .. tostring(reactorVariant.name)
+                    .. " module=" .. tostring(moduleVariant.name)
+                    .. " usedFallback=" .. tostring(usedFallback)
+                )
+
+                return {
+                  reactor = reactorSelected,
+                  module = moduleSelected,
+                  reactorTier = reactorTier,
+                  moduleTier = moduleTier,
+                  requestedTier = preferredTier,
+                  usedFallback = usedFallback,
+                  sawVramError = sawVramError,
+                  reactorOnly = false,
+                }, nil
               end
+
+              if moduleErrClass == "vram_alloc_failed" then
+                sawVramError = true
+              end
+
+              appendUiRuntimeLog(
+                "asset pair failed: class=" .. tostring(moduleErrClass or "decode_failed")
+                  .. " reactorVariant=" .. tostring(reactorVariant.name)
+                  .. " moduleVariant=" .. tostring(moduleVariant.name)
+                  .. " reactorTier=" .. tostring(reactorTier)
+                  .. " moduleTier=" .. tostring(moduleTier)
+              )
             end
           end
-
-          appendUiRuntimeLog("asset scene: no module fallback available for reactor variant " .. tostring(reactorVariant.name))
-          reactorSelected = nil
-          pcall(collectgarbage, "collect")
-        elseif reactorErrClass == "vram_alloc_failed" then
-          sawVramError = true
         end
+
+        if reactorFallback and reactorFallback.reactor ~= reactorSelected then
+          reactorSelected = nil
+        end
+        pcall(collectgarbage, "collect")
+      elseif reactorErrClass == "vram_alloc_failed" then
+        sawVramError = true
       end
     end
   end
 
-  appendUiRuntimeLog("asset scene: no fallback available across tiers")
-  return nil, sawVramError and "no_scene_pair_vram" or "no_scene_pair_available"
+  if reactorFallback and reactorFallback.reactor then
+    appendUiRuntimeLog(
+      "asset scene: no full pair loaded, using reactor-only fallback"
+        .. " reactorTier=" .. tostring(reactorFallback.reactorTier)
+        .. " requestedTier=" .. tostring(preferredTier)
+        .. " class=no_pair_loaded"
+    )
+    return {
+      reactor = reactorFallback.reactor,
+      module = nil,
+      reactorTier = reactorFallback.reactorTier,
+      moduleTier = "none",
+      requestedTier = preferredTier,
+      usedFallback = true,
+      sawVramError = sawVramError,
+      reactorOnly = true,
+    }, "no_pair_loaded"
+  end
+
+  appendUiRuntimeLog("asset scene: no_pair_loaded (no reactor usable)")
+  return nil, sawVramError and "no_scene_pair_vram" or "no_pair_loaded"
 end
 
 local function refreshVisualEffectLevel()
@@ -874,7 +1028,7 @@ local function tryLoadAssets(reason)
   local screen = tostring(ui and (ui.sw .. "x" .. ui.sh) or "n/a")
   local hadPreviousReactor = (#images.reactorVariants > 0) or (images.reactor ~= nil)
   local hadPreviousModule = (#images.laserModuleVariants > 0) or (images.laserModule ~= nil)
-  local hadPreviousScene = hadPreviousReactor and hadPreviousModule
+  local hadPreviousVisual = hadPreviousReactor
   local previousReactor = hadPreviousReactor and tostring(state.visual.reactorAsset or "runtime") or "none"
   local previousModule = hadPreviousModule and tostring(state.visual.moduleAsset or "runtime") or "none"
   local requestedTier = preferredSceneTier()
@@ -886,30 +1040,37 @@ local function tryLoadAssets(reason)
       .. ", previousPair=" .. tostring(previousReactor) .. "/" .. tostring(previousModule)
   )
 
-  local pair, loadErr = loadScenePair(requestedTier)
-  if pair and pair.reactor and pair.module then
-    -- Atomic swap: only replace active assets once both parts are ready.
-    images.reactorVariants = { pair.reactor }
-    images.reactor = pair.reactor.image
-    images.laserModuleVariants = { pair.module }
-    images.laserModule = pair.module.image
+  local scene, loadErr = loadScenePair(requestedTier)
+  if scene and scene.reactor then
+    -- Atomic swap: keep active assets untouched until a complete scene decision is ready.
+    images.reactorVariants = { scene.reactor }
+    images.reactor = scene.reactor.image
 
-    state.visual.reactorAsset = pair.reactor.name
-    state.visual.moduleAsset = pair.module.name
-    state.visual.vramFallback = pair.sawVramError or pair.usedFallback
+    if scene.module then
+      images.laserModuleVariants = { scene.module }
+      images.laserModule = scene.module.image
+    else
+      images.laserModuleVariants = {}
+      images.laserModule = nil
+    end
+
+    state.visual.reactorAsset = scene.reactor.name
+    state.visual.moduleAsset = scene.module and scene.module.name or "none"
+    state.visual.vramFallback = scene.sawVramError or scene.usedFallback or scene.reactorOnly or false
     state.visual.lastAssetReason = reason
 
     appendUiRuntimeLog(
-      "asset reload applied: reactor=" .. tostring(pair.reactor.name)
-        .. " module=" .. tostring(pair.module.name)
-        .. " reactorTier=" .. tostring(pair.reactorTier)
-        .. " moduleTier=" .. tostring(pair.moduleTier)
-        .. " fallback=" .. tostring(pair.usedFallback)
+      "asset reload applied: reactor=" .. tostring(scene.reactor.name)
+        .. " module=" .. tostring(scene.module and scene.module.name or "none")
+        .. " reactorTier=" .. tostring(scene.reactorTier)
+        .. " moduleTier=" .. tostring(scene.moduleTier)
+        .. " reactorOnly=" .. tostring(scene.reactorOnly)
+        .. " fallback=" .. tostring(scene.usedFallback)
     )
   else
-    if hadPreviousScene then
+    if hadPreviousVisual then
       appendUiRuntimeLog(
-        "asset reload failed, preserving previous valid pair: "
+        "asset reload failed, preserving previous visual state: "
           .. tostring(previousReactor) .. "/" .. tostring(previousModule)
           .. " reason=" .. tostring(loadErr)
       )
