@@ -1,6 +1,6 @@
 {
     "name":  "Fusion-Tom-manage",
-    "version":  "1.2.0",
+    "version":  "1.2.1",
     "channel":  "stable",
     "entrypoint":  "start_menu_pages_live_v7.lua",
     "source":  {
@@ -9,10 +9,17 @@
                    "branch":  "main",
                    "manifestPath":  "fusion.manifest.json"
                },
+    "integrity":  {
+                      "mode":  "size",
+                      "hashPlanned":  true,
+                      "hashAlgorithms":  [
+                                             "sha256"
+                                         ]
+                  },
     "files":  [
                   {
                       "path":  "start_menu_pages_live_v7.lua",
-                      "size":  94059
+                      "size":  100770
                   },
                   {
                       "path":  "install.lua",
@@ -35,15 +42,15 @@
                   },
                   {
                       "path":  "core/update/manifest.lua",
-                      "size":  4965
+                      "size":  5854
                   },
                   {
                       "path":  "core/update/client.lua",
-                      "size":  3718
+                      "size":  4064
                   },
                   {
                       "path":  "core/update/apply.lua",
-                      "size":  5677
+                      "size":  9004
                   },
                   {
                       "path":  "gpu_debug.lua",

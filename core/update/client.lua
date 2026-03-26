@@ -74,7 +74,7 @@ function M.fetchBinary(url)
   return M.fetch(url, true)
 end
 
-function M.downloadFile(source, relativePath, destinationPath)
+function M.downloadFile(source, relativePath, destinationPath, entry)
   local url = M.buildRawUrl(source, relativePath)
   local payload, err = M.fetchBinary(url)
   if not payload then
@@ -93,6 +93,8 @@ function M.downloadFile(source, relativePath, destinationPath)
     path = normalizePath(relativePath),
     size = #payload,
     url = url,
+    hash = type(entry) == "table" and entry.hash or nil,
+    hashAlgo = type(entry) == "table" and entry.hashAlgo or nil,
   }
 end
 
@@ -118,7 +120,7 @@ function M.downloadFiles(source, fileEntries, targetDir, logger)
 
     local normalizedPath = normalizePath(relativePath)
     local destination = fs.combine(targetDir, normalizedPath)
-    local downloaded, err = M.downloadFile(source, normalizedPath, destination)
+    local downloaded, err = M.downloadFile(source, normalizedPath, destination, entry)
     if not downloaded then
       return nil, err
     end
@@ -130,6 +132,9 @@ function M.downloadFiles(source, fileEntries, targetDir, logger)
     out[#out + 1] = downloaded
     if logger then
       logger("downloaded " .. tostring(downloaded.path) .. " (" .. tostring(downloaded.size) .. " bytes)")
+      if downloaded.hash then
+        logger("integrity hint present for " .. tostring(downloaded.path) .. " (" .. tostring(downloaded.hashAlgo or "hash") .. ", verification pending implementation)")
+      end
     end
   end
 

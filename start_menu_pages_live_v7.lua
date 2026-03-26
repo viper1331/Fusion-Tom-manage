@@ -125,6 +125,21 @@ local UPDATE_LOG_FILE = "update.log"
 local UPDATE_TEMP_DIR = "update_tmp"
 local UPDATE_BACKUP_DIR = "backup_last"
 
+local UPDATE_STATUS = {
+  IDLE = "IDLE",
+  CHECKING = "CHECKING",
+  CHECK_FAILED = "CHECK FAILED",
+  UPDATE_AVAILABLE = "UPDATE AVAILABLE",
+  UP_TO_DATE = "UP TO DATE",
+  DOWNLOADING = "DOWNLOADING",
+  DOWNLOAD_FAILED = "DOWNLOAD FAILED",
+  READY_TO_APPLY = "READY TO APPLY",
+  APPLYING = "APPLYING",
+  APPLY_FAILED = "APPLY FAILED",
+  ROLLBACK_DONE = "ROLLBACK DONE",
+  ROLLBACK_FAILED = "ROLLBACK FAILED",
+}
+
 local UpdateVersion = assert(dofile("core/update/version.lua"))
 local UpdateManifest = assert(dofile("core/update/manifest.lua"))
 local UpdateClient = assert(dofile("core/update/client.lua"))
@@ -283,7 +298,9 @@ local state = {
     localVersion = "n/a",
     remoteVersion = "n/a",
     channel = UPDATE_CFG.channel,
-    remoteStatus = "idle",
+    remoteStatus = UPDATE_STATUS.IDLE,
+    statusDetail = "waiting for check",
+    statusAt = "never",
     filesToUpdate = 0,
     downloadedFiles = 0,
     lastCheck = "never",
@@ -714,7 +731,9 @@ local function drawButton(id, x, y, w, h, text, tone, active)
   local ty = y + math.max(0, math.floor((h - textPixelHeight(1)) / 2))
   drawTextCenter(x, ty, w, text, fg, 1)
 
-  buttons[id] = { x = x, y = y, w = w, h = h, id = id }
+  if active then
+    buttons[id] = { x = x, y = y, w = w, h = h, id = id }
+  end
 end
 
 local function drawToggleRow(r, y, label, value, valueColor)
@@ -1718,7 +1737,7 @@ end
 
 local function getDataSummary(data)
   if state.page == "MAJ" then
-    return state.update.lastCheckSummary or "update idle"
+    return state.update.remoteStatus or UPDATE_STATUS.IDLE
   end
 
   if not data.logicPresent then
@@ -1784,6 +1803,89 @@ local function appendUpdateLogLine(message)
     fh.close()
   end
   loadUpdateLogTail(12)
+end
+
+local function updateStatusColor(status)
+  if status == UPDATE_STATUS.UP_TO_DATE then
+    return C.green
+  end
+  if status == UPDATE_STATUS.UPDATE_AVAILABLE or status == UPDATE_STATUS.READY_TO_APPLY then
+    return C.orange
+  end
+  if status == UPDATE_STATUS.CHECKING or status == UPDATE_STATUS.DOWNLOADING or status == UPDATE_STATUS.APPLYING then
+    return C.cyan
+  end
+  if status == UPDATE_STATUS.ROLLBACK_DONE then
+    return C.yellow
+  end
+  if status == UPDATE_STATUS.CHECK_FAILED or status == UPDATE_STATUS.DOWNLOAD_FAILED or status == UPDATE_STATUS.APPLY_FAILED or status == UPDATE_STATUS.ROLLBACK_FAILED then
+    return C.red
+  end
+  return C.muted
+end
+
+local function setUpdateStatus(status, detail, logIt)
+  state.update.remoteStatus = status or UPDATE_STATUS.IDLE
+  state.update.statusDetail = firstLine(detail or "")
+  state.update.statusAt = nowText()
+  if logIt then
+    appendUpdateLogLine("STATUS " .. tostring(state.update.remoteStatus) .. " | " .. tostring(state.update.statusDetail))
+  end
+end
+
+local function setDownloadedState(flag, count)
+  state.update.downloaded = flag == true
+  state.update.downloadedFiles = state.update.downloaded and math.max(0, math.floor(count or 0)) or 0
+  if not state.update.downloaded then
+    state.update.applyConfirmArmed = false
+  end
+end
+
+local function formatUpdateUserError(step, err)
+  local raw = firstLine(err or "unknown error")
+  local lower = string.lower(raw)
+
+  if string.find(lower, "http disabled", 1, true) then
+    return step .. ": HTTP disabled. Enable HTTP in ComputerCraft config."
+  end
+  if string.find(lower, "http 404", 1, true) then
+    return step .. ": remote file not found (404). Check owner/repo/branch/manifestPath."
+  end
+  if string.find(lower, "source incomplete", 1, true) then
+    return step .. ": update source is incomplete (owner/repo/branch)."
+  end
+  if string.find(lower, "staging", 1, true) then
+    return step .. ": staging is invalid or incomplete. Run DOWNLOAD again."
+  end
+  if string.find(lower, "size mismatch", 1, true) then
+    return step .. ": file integrity check failed (size mismatch)."
+  end
+  if string.find(lower, "manifest", 1, true) then
+    return step .. ": manifest issue: " .. raw
+  end
+
+  return step .. ": " .. raw
+end
+
+local function failUpdateStep(step, status, err)
+  local userMessage = formatUpdateUserError(step, err)
+  state.update.lastError = userMessage
+  state.update.lastCheckSummary = string.lower(step) .. " failed"
+  setUpdateStatus(status, userMessage, false)
+  appendUpdateLogLine(step .. " failed (raw): " .. tostring(firstLine(err)))
+  appendUpdateLogLine(step .. " failed (ui): " .. tostring(userMessage))
+  return false, userMessage
+end
+
+local function clearStagingWithLog(reason)
+  local ok, err = UpdateApply.clearPath(UPDATE_TEMP_DIR)
+  if ok then
+    appendUpdateLogLine("STAGING cleared (" .. tostring(reason or "cleanup") .. ")")
+    return true
+  end
+
+  appendUpdateLogLine("STAGING cleanup failed (" .. tostring(reason or "cleanup") .. "): " .. tostring(err))
+  return false, err
 end
 
 local function buildUpdateSource(remoteManifest)
@@ -1861,81 +1963,72 @@ end
 local function performUpdateCheck(reason)
   state.update.applyConfirmArmed = false
   state.update.lastCheck = nowText()
+  setDownloadedState(false, 0)
+  setUpdateStatus(UPDATE_STATUS.CHECKING, "fetching remote manifest", true)
+  appendUpdateLogLine("CHECK start: reason=" .. tostring(reason or "manual"))
   refreshLocalUpdateSnapshot()
 
   if not UpdateClient.isHttpEnabled() then
-    local msg = "HTTP disabled in ComputerCraft"
-    state.update.remoteStatus = "http disabled"
-    state.update.lastError = msg
-    state.update.lastCheckSummary = "check failed"
-    appendUpdateLogLine("CHECK failed: " .. msg)
-    return false, msg
+    return failUpdateStep("CHECK", UPDATE_STATUS.CHECK_FAILED, "http disabled in ComputerCraft")
   end
 
   local source = buildUpdateSource(nil)
   local sourceOk, sourceErr = validateUpdateSource(source)
   if not sourceOk then
-    state.update.remoteStatus = "source error"
-    state.update.lastError = sourceErr
-    state.update.lastCheckSummary = "check failed"
-    appendUpdateLogLine("CHECK failed: " .. tostring(sourceErr))
-    return false, sourceErr
+    return failUpdateStep("CHECK", UPDATE_STATUS.CHECK_FAILED, sourceErr)
   end
 
   local manifestPath = resolveManifestPath(nil)
   local manifestUrl = UpdateClient.buildRawUrl(source, manifestPath)
+  appendUpdateLogLine("CHECK manifest url: " .. tostring(manifestUrl))
   local remoteManifest, remoteErr = UpdateManifest.readRemote(UpdateClient, manifestUrl)
   if not remoteManifest then
-    state.update.remoteStatus = "offline"
-    state.update.lastError = remoteErr
-    state.update.lastCheckSummary = "check failed"
-    appendUpdateLogLine("CHECK failed: " .. tostring(remoteErr))
-    return false, remoteErr
+    return failUpdateStep("CHECK", UPDATE_STATUS.CHECK_FAILED, remoteErr)
   end
 
   local remoteSource = buildUpdateSource(remoteManifest)
   local remoteSourceOk, remoteSourceErr = validateUpdateSource(remoteSource)
   if not remoteSourceOk then
-    state.update.remoteStatus = "source error"
-    state.update.lastError = remoteSourceErr
-    state.update.lastCheckSummary = "check failed"
-    appendUpdateLogLine("CHECK failed: " .. tostring(remoteSourceErr))
-    return false, remoteSourceErr
+    return failUpdateStep("CHECK", UPDATE_STATUS.CHECK_FAILED, remoteSourceErr)
   end
 
   state.update.remoteManifest = remoteManifest
   state.update.remoteSource = remoteSource
   state.update.remoteVersion = tostring(remoteManifest.version or "n/a")
   state.update.channel = tostring(remoteManifest.channel or UPDATE_CFG.channel)
+  appendUpdateLogLine("CHECK integrity mode: " .. tostring(remoteManifest.integrity and remoteManifest.integrity.mode or "size"))
   state.update.pendingFiles = UpdateManifest.computePendingFiles(state.update.localManifest, remoteManifest)
   state.update.filesToUpdate = #state.update.pendingFiles
-  state.update.remoteStatus = "online"
   state.update.lastError = "none"
-  state.update.downloaded = false
-  state.update.downloadedFiles = 0
+  setDownloadedState(false, 0)
 
   local newer, cmpErr = UpdateVersion.isRemoteNewer(state.update.localVersion, state.update.remoteVersion)
+  local status = UPDATE_STATUS.UP_TO_DATE
   if newer == nil then
     if state.update.filesToUpdate > 0 then
-      state.update.lastCheckSummary = "update available"
+      status = UPDATE_STATUS.UPDATE_AVAILABLE
     else
-      state.update.lastCheckSummary = "checked (version compare unavailable)"
+      status = UPDATE_STATUS.UP_TO_DATE
     end
     if cmpErr then
       appendUpdateLogLine("CHECK warning: " .. tostring(cmpErr))
     end
   elseif newer or state.update.filesToUpdate > 0 then
-    state.update.lastCheckSummary = "update available"
+    status = UPDATE_STATUS.UPDATE_AVAILABLE
   else
-    state.update.lastCheckSummary = "up to date"
+    status = UPDATE_STATUS.UP_TO_DATE
   end
 
-  appendUpdateLogLine("CHECK " .. tostring(reason or "manual") .. ": local=" .. tostring(state.update.localVersion) .. ", remote=" .. tostring(state.update.remoteVersion) .. ", pending=" .. tostring(state.update.filesToUpdate))
+  state.update.lastCheckSummary = status == UPDATE_STATUS.UPDATE_AVAILABLE and "update available" or "up to date"
+  setUpdateStatus(status, "local=" .. tostring(state.update.localVersion) .. " remote=" .. tostring(state.update.remoteVersion) .. " pending=" .. tostring(state.update.filesToUpdate), true)
+  appendUpdateLogLine("CHECK done: local=" .. tostring(state.update.localVersion) .. ", remote=" .. tostring(state.update.remoteVersion) .. ", files=" .. tostring(state.update.filesToUpdate))
   return true, state.update.lastCheckSummary
 end
 
 local function performUpdateDownload()
   state.update.applyConfirmArmed = false
+  setUpdateStatus(UPDATE_STATUS.DOWNLOADING, "preparing staging directory", true)
+  appendUpdateLogLine("DOWNLOAD start")
 
   if not state.update.remoteManifest then
     local ok, err = performUpdateCheck("download precheck")
@@ -1948,55 +2041,89 @@ local function performUpdateDownload()
   local remoteSource = state.update.remoteSource or buildUpdateSource(remoteManifest)
   local sourceOk, sourceErr = validateUpdateSource(remoteSource)
   if not sourceOk then
-    state.update.lastError = sourceErr
-    state.update.remoteStatus = "source error"
-    appendUpdateLogLine("DOWNLOAD failed: " .. tostring(sourceErr))
-    return false, sourceErr
+    clearStagingWithLog("source invalid")
+    setDownloadedState(false, 0)
+    return failUpdateStep("DOWNLOAD", UPDATE_STATUS.DOWNLOAD_FAILED, sourceErr)
   end
 
-  local clearOk, clearErr = UpdateApply.clearPath(UPDATE_TEMP_DIR)
+  local clearOk, clearErr = clearStagingWithLog("before download")
   if not clearOk then
-    state.update.lastError = clearErr
-    appendUpdateLogLine("DOWNLOAD failed: " .. tostring(clearErr))
-    return false, clearErr
+    setDownloadedState(false, 0)
+    return failUpdateStep("DOWNLOAD", UPDATE_STATUS.DOWNLOAD_FAILED, clearErr)
   end
 
   fs.makeDir(UPDATE_TEMP_DIR)
+  appendUpdateLogLine("DOWNLOAD files planned: " .. tostring(#(remoteManifest.files or {})))
 
   local downloaded, downloadErr = UpdateClient.downloadFiles(remoteSource, remoteManifest.files, UPDATE_TEMP_DIR, appendUpdateLogLine)
   if not downloaded then
-    state.update.lastError = downloadErr
-    state.update.remoteStatus = "download error"
-    appendUpdateLogLine("DOWNLOAD failed: " .. tostring(downloadErr))
-    return false, downloadErr
+    clearStagingWithLog("download failure")
+    setDownloadedState(false, 0)
+    return failUpdateStep("DOWNLOAD", UPDATE_STATUS.DOWNLOAD_FAILED, downloadErr)
   end
 
-  state.update.downloaded = true
-  state.update.downloadedFiles = #downloaded
+  local stagingContext = {
+    remoteVersion = tostring(state.update.remoteVersion or "n/a"),
+    manifestVersion = tostring(remoteManifest.version or "n/a"),
+    channel = tostring(state.update.channel or "stable"),
+    checkedAt = tostring(state.update.lastCheck or "never"),
+  }
+
+  local marked, markedErr = UpdateApply.markStagingReady(remoteManifest.files, UPDATE_TEMP_DIR, stagingContext)
+  if not marked then
+    clearStagingWithLog("staging meta failure")
+    setDownloadedState(false, 0)
+    return failUpdateStep("DOWNLOAD", UPDATE_STATUS.DOWNLOAD_FAILED, markedErr)
+  end
+
+  local valid, validErr = UpdateApply.validateStaging(remoteManifest.files, UPDATE_TEMP_DIR, stagingContext)
+  if not valid then
+    clearStagingWithLog("staging validation failure")
+    setDownloadedState(false, 0)
+    return failUpdateStep("DOWNLOAD", UPDATE_STATUS.DOWNLOAD_FAILED, validErr)
+  end
+
+  setDownloadedState(true, #downloaded)
   state.update.lastDownload = nowText()
   state.update.lastError = "none"
-  state.update.remoteStatus = "downloaded"
-  appendUpdateLogLine("DOWNLOAD success: files=" .. tostring(#downloaded))
+  state.update.lastCheckSummary = "ready to apply"
+  setUpdateStatus(UPDATE_STATUS.READY_TO_APPLY, "downloaded files=" .. tostring(#downloaded), true)
+  appendUpdateLogLine("DOWNLOAD done: files=" .. tostring(#downloaded))
 
-  return true, "downloaded " .. tostring(#downloaded) .. " files"
+  return true, "ready to apply (" .. tostring(#downloaded) .. " files)"
 end
 
 local function performUpdateApply()
   if UPDATE_CFG.requireConfirmApply and not state.update.applyConfirmArmed then
     state.update.applyConfirmArmed = true
+    setUpdateStatus(UPDATE_STATUS.READY_TO_APPLY, "confirmation required before apply", true)
     appendUpdateLogLine("APPLY waiting confirmation")
     return false, "confirmation required: press APPLY again"
   end
 
   state.update.applyConfirmArmed = false
+  setUpdateStatus(UPDATE_STATUS.APPLYING, "validating staging and applying update", true)
+  appendUpdateLogLine("APPLY start")
 
   local remoteManifest = state.update.remoteManifest
   if not remoteManifest then
-    return false, "check required before apply"
+    return failUpdateStep("APPLY", UPDATE_STATUS.APPLY_FAILED, "check required before apply")
   end
 
   if not state.update.downloaded then
-    return false, "download required before apply"
+    return failUpdateStep("APPLY", UPDATE_STATUS.APPLY_FAILED, "download required before apply")
+  end
+
+  local expectedContext = {
+    remoteVersion = tostring(state.update.remoteVersion or "n/a"),
+    manifestVersion = tostring(remoteManifest.version or "n/a"),
+  }
+
+  local stageOk, stageErr = UpdateApply.validateStaging(remoteManifest.files, UPDATE_TEMP_DIR, expectedContext)
+  if not stageOk then
+    clearStagingWithLog("apply refused invalid staging")
+    setDownloadedState(false, 0)
+    return failUpdateStep("APPLY", UPDATE_STATUS.APPLY_FAILED, stageErr)
   end
 
   local context = {
@@ -2006,35 +2133,40 @@ local function performUpdateApply()
 
   local backupOk, backupErr = UpdateApply.createBackup(remoteManifest.files, UPDATE_BACKUP_DIR, context, appendUpdateLogLine)
   if not backupOk then
-    state.update.lastError = backupErr
-    appendUpdateLogLine("APPLY failed (backup): " .. tostring(backupErr))
-    return false, backupErr
+    setDownloadedState(false, 0)
+    return failUpdateStep("APPLY", UPDATE_STATUS.APPLY_FAILED, backupErr)
   end
 
   local applied, applyErr = UpdateApply.applyFromStaging(remoteManifest.files, UPDATE_TEMP_DIR, appendUpdateLogLine)
   if not applied then
+    setUpdateStatus(UPDATE_STATUS.APPLY_FAILED, "apply failed, rollback attempt started", true)
     local rolledBack, rollbackErr = UpdateApply.rollback(UPDATE_BACKUP_DIR, appendUpdateLogLine)
     if rolledBack then
-      state.update.lastError = "apply failed, rollback done: " .. tostring(applyErr)
-      appendUpdateLogLine("APPLY failed, rollback done: " .. tostring(applyErr))
+      clearStagingWithLog("after automatic rollback")
+      setDownloadedState(false, 0)
+      state.update.lastApply = nowText() .. " (auto rollback)"
+      state.update.lastError = formatUpdateUserError("APPLY", applyErr)
+      state.update.lastCheckSummary = "rollback done after apply failure"
+      setUpdateStatus(UPDATE_STATUS.ROLLBACK_DONE, "automatic rollback completed", true)
+      appendUpdateLogLine("APPLY failed -> automatic rollback done: " .. tostring(firstLine(applyErr)))
       refreshLocalUpdateSnapshot()
-      return false, state.update.lastError
+      return false, state.update.lastError .. " (automatic rollback done)"
     end
 
-    state.update.lastError = "apply failed and rollback failed: " .. tostring(applyErr) .. " / " .. tostring(rollbackErr)
-    appendUpdateLogLine("APPLY critical failure: " .. state.update.lastError)
-    return false, state.update.lastError
+    clearStagingWithLog("after failed apply/rollback")
+    setDownloadedState(false, 0)
+    return failUpdateStep("APPLY", UPDATE_STATUS.APPLY_FAILED, "apply failed: " .. tostring(applyErr) .. " ; rollback failed: " .. tostring(rollbackErr))
   end
 
-  UpdateApply.clearPath(UPDATE_TEMP_DIR)
+  clearStagingWithLog("after apply success")
   state.update.lastApply = nowText()
-  state.update.remoteStatus = "applied"
-  state.update.downloaded = false
-  state.update.downloadedFiles = 0
+  setDownloadedState(false, 0)
   state.update.pendingFiles = {}
   state.update.filesToUpdate = 0
   state.update.lastError = "none"
+  state.update.lastCheckSummary = "up to date"
   refreshLocalUpdateSnapshot()
+  setUpdateStatus(UPDATE_STATUS.UP_TO_DATE, "apply completed successfully", true)
   appendUpdateLogLine("APPLY success: local version=" .. tostring(state.update.localVersion))
 
   return true, "apply done"
@@ -2042,21 +2174,21 @@ end
 
 local function performUpdateRollback()
   state.update.applyConfirmArmed = false
+  appendUpdateLogLine("ROLLBACK start")
 
   local rolledBack, rollbackErr = UpdateApply.rollback(UPDATE_BACKUP_DIR, appendUpdateLogLine)
   if not rolledBack then
-    state.update.lastError = rollbackErr
-    appendUpdateLogLine("ROLLBACK failed: " .. tostring(rollbackErr))
-    return false, rollbackErr
+    setDownloadedState(false, 0)
+    return failUpdateStep("ROLLBACK", UPDATE_STATUS.ROLLBACK_FAILED, rollbackErr)
   end
 
-  UpdateApply.clearPath(UPDATE_TEMP_DIR)
+  clearStagingWithLog("after manual rollback")
   state.update.lastApply = nowText() .. " (rollback)"
-  state.update.remoteStatus = "rolled back"
-  state.update.downloaded = false
-  state.update.downloadedFiles = 0
+  setDownloadedState(false, 0)
   state.update.lastError = "none"
+  state.update.lastCheckSummary = "rollback done"
   refreshLocalUpdateSnapshot()
+  setUpdateStatus(UPDATE_STATUS.ROLLBACK_DONE, "backup restored", true)
   appendUpdateLogLine("ROLLBACK success: local version=" .. tostring(state.update.localVersion))
 
   return true, "rollback done"
@@ -2192,7 +2324,7 @@ end
 local function drawMicroMajPage(r, data)
   drawPanel(r.x, r.y, r.w, r.h, "MAJ")
 
-  local infoH = math.max(52, math.floor(r.h * 0.40))
+  local infoH = math.max(64, math.floor(r.h * 0.46))
   local infoRect = { x = r.x + ui.smallPad, y = r.y + sv(18), w = r.w - ui.smallPad * 2, h = infoH }
   local actionsRect = {
     x = r.x + ui.smallPad,
@@ -2205,17 +2337,21 @@ local function drawMicroMajPage(r, data)
   drawText(infoRect.x + 1, rowY, "LV", C.text, 1)
   drawTextRight(infoRect.x + infoRect.w - 1, rowY, state.update.localVersion, C.cyan, 1)
 
-  rowY = rowY + 11
+  rowY = rowY + 10
   drawText(infoRect.x + 1, rowY, "RV", C.text, 1)
   drawTextRight(infoRect.x + infoRect.w - 1, rowY, state.update.remoteVersion, C.yellow, 1)
 
-  rowY = rowY + 11
+  rowY = rowY + 10
+  drawText(infoRect.x + 1, rowY, "ST", C.text, 1)
+  drawTextRight(infoRect.x + infoRect.w - 1, rowY, state.update.remoteStatus, updateStatusColor(state.update.remoteStatus), 1)
+
+  rowY = rowY + 10
   drawText(infoRect.x + 1, rowY, "FILES", C.text, 1)
   drawTextRight(infoRect.x + infoRect.w - 1, rowY, tostring(state.update.filesToUpdate), state.update.filesToUpdate > 0 and C.orange or C.green, 1)
 
-  rowY = rowY + 11
-  drawText(infoRect.x + 1, rowY, "STAT", C.text, 1)
-  drawTextRight(infoRect.x + infoRect.w - 1, rowY, state.update.remoteStatus, C.muted, 1)
+  rowY = rowY + 10
+  drawText(infoRect.x + 1, rowY, "ERR", C.text, 1)
+  drawTextRight(infoRect.x + infoRect.w - 1, rowY, state.update.lastError == "none" and "-" or firstLine(state.update.lastError), state.update.lastError == "none" and C.muted or C.red, 1)
 
   local pad = 1
   local gap = math.max(1, math.floor(ui.smallPad * 0.6))
@@ -2229,7 +2365,7 @@ local function drawMicroMajPage(r, data)
 
   drawButton("UPDATE_CHECK", x1, y1, bw, bh, "CHECK", "cyan", true)
   drawButton("UPDATE_DOWNLOAD", x2, y1, bw, bh, "DL", "purple", true)
-  drawButton("UPDATE_APPLY", x1, y2, bw, bh, "APPLY", "green", true)
+  drawButton("UPDATE_APPLY", x1, y2, bw, bh, "APPLY", "green", state.update.downloaded)
   drawButton("UPDATE_ROLLBACK", x2, y2, bw, bh, "ROLL", "orange", state.update.canRollback)
   drawButton("UPDATE_RESTART", x1, y3, bw * 2 + gap, bh, "RESTART", "red", true)
 end
@@ -2249,15 +2385,17 @@ local function drawUpdatePage(r)
   local baseY = statusRect.y + sv(54)
   local step = math.max(12, sv(16))
   local statusRows = {
+    { label = "STATUS", value = state.update.remoteStatus, color = updateStatusColor(state.update.remoteStatus) },
+    { label = "DETAIL", value = state.update.statusDetail ~= "" and state.update.statusDetail or "-", color = C.muted },
     { label = "LOCAL VERSION", value = state.update.localVersion, color = C.cyan },
     { label = "REMOTE VERSION", value = state.update.remoteVersion, color = C.yellow },
     { label = "CHANNEL", value = state.update.channel, color = C.text },
-    { label = "REMOTE STATUS", value = state.update.remoteStatus, color = state.update.remoteStatus == "online" and C.green or C.orange },
     { label = "FILES TO UPDATE", value = tostring(state.update.filesToUpdate), color = state.update.filesToUpdate > 0 and C.orange or C.green },
     { label = "LAST CHECK", value = state.update.lastCheck, color = C.text },
     { label = "LAST APPLY", value = state.update.lastApply, color = C.text },
     { label = "LAST DOWNLOAD", value = state.update.lastDownload, color = C.text },
     { label = "CHECK SUMMARY", value = state.update.lastCheckSummary, color = C.muted },
+    { label = "LAST ERROR", value = state.update.lastError == "none" and "-" or firstLine(state.update.lastError), color = state.update.lastError == "none" and C.muted or C.red },
   }
 
   local maxRows = math.max(4, math.floor((statusRect.h - sv(58)) / step))
@@ -2301,7 +2439,7 @@ local function drawUpdatePage(r)
 
   drawButton("UPDATE_CHECK", x1, y1, bw3, bh, "[CHECK]", "cyan", true)
   drawButton("UPDATE_DOWNLOAD", x2, y1, bw3, bh, "[DOWNLOAD]", "purple", true)
-  drawButton("UPDATE_APPLY", x3, y1, bw3, bh, UPDATE_CFG.requireConfirmApply and (state.update.applyConfirmArmed and "[APPLY CONFIRM]" or "[APPLY]") or "[APPLY]", "green", true)
+  drawButton("UPDATE_APPLY", x3, y1, bw3, bh, UPDATE_CFG.requireConfirmApply and (state.update.applyConfirmArmed and "[APPLY CONFIRM]" or "[APPLY]") or "[APPLY]", "green", state.update.downloaded)
 
   local bw2 = math.floor((usableW - gap) / 2)
   drawButton("UPDATE_ROLLBACK", x1, y2, bw2, bh, "[ROLLBACK]", "orange", state.update.canRollback)
@@ -2721,19 +2859,19 @@ local function handleAction(action)
 
   elseif action == "UPDATE_CHECK" then
     local ok, msg = performUpdateCheck("manual")
-    state.message = ok and ("maj check: " .. firstLine(msg)) or ("maj check failed: " .. firstLine(msg))
+    state.message = ok and ("MAJ CHECK -> " .. tostring(state.update.remoteStatus) .. " (" .. firstLine(msg) .. ")") or ("MAJ CHECK ERROR -> " .. firstLine(msg))
 
   elseif action == "UPDATE_DOWNLOAD" then
     local ok, msg = performUpdateDownload()
-    state.message = ok and ("maj download: " .. firstLine(msg)) or ("maj download failed: " .. firstLine(msg))
+    state.message = ok and ("MAJ DOWNLOAD -> " .. tostring(state.update.remoteStatus) .. " (" .. firstLine(msg) .. ")") or ("MAJ DOWNLOAD ERROR -> " .. firstLine(msg))
 
   elseif action == "UPDATE_APPLY" then
     local ok, msg = performUpdateApply()
-    state.message = ok and ("maj apply: " .. firstLine(msg)) or ("maj apply pending/failed: " .. firstLine(msg))
+    state.message = ok and ("MAJ APPLY -> " .. tostring(state.update.remoteStatus) .. " (" .. firstLine(msg) .. ")") or ("MAJ APPLY ERROR -> " .. firstLine(msg))
 
   elseif action == "UPDATE_ROLLBACK" then
     local ok, msg = performUpdateRollback()
-    state.message = ok and ("maj rollback: " .. firstLine(msg)) or ("maj rollback failed: " .. firstLine(msg))
+    state.message = ok and ("MAJ ROLLBACK -> " .. tostring(state.update.remoteStatus) .. " (" .. firstLine(msg) .. ")") or ("MAJ ROLLBACK ERROR -> " .. firstLine(msg))
 
   elseif action == "UPDATE_RESTART" then
     local ok, msg = requestProgramRestart()

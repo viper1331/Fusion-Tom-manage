@@ -1,4 +1,5 @@
 local M = {}
+local STAGING_META_NAME = "staging_meta.lua"
 
 local function normalizePath(path)
   path = tostring(path or "")
@@ -91,15 +92,113 @@ local function saveMeta(metaPath, meta)
   return true
 end
 
+local function listPaths(fileEntries)
+  local out = {}
+  for _, entry in ipairs(fileEntries or {}) do
+    local path = normalizePath(entry.path)
+    if path ~= "" then
+      out[#out + 1] = path
+    end
+  end
+  return out
+end
+
+local function mapByPath(list)
+  local map = {}
+  for _, entry in ipairs(list or {}) do
+    if type(entry) == "table" and type(entry.path) == "string" and entry.path ~= "" then
+      map[entry.path] = entry
+    end
+  end
+  return map
+end
+
 function M.clearPath(path)
   return deleteTree(path)
 end
 
-function M.validateStaging(fileEntries, stagingDir)
+function M.readStagingMeta(stagingDir)
+  local metaPath = fs.combine(stagingDir, STAGING_META_NAME)
+  return loadMeta(metaPath)
+end
+
+function M.writeStagingMeta(stagingDir, meta)
+  local metaPath = fs.combine(stagingDir, STAGING_META_NAME)
+  return saveMeta(metaPath, meta)
+end
+
+function M.markStagingReady(fileEntries, stagingDir, context)
+  local files = {}
+
+  for _, entry in ipairs(fileEntries or {}) do
+    local path = normalizePath(entry.path)
+    if path ~= "" then
+      files[#files + 1] = {
+        path = path,
+        size = type(entry.size) == "number" and math.max(0, math.floor(entry.size)) or nil,
+        hash = type(entry.hash) == "string" and entry.hash or nil,
+        hashAlgo = type(entry.hashAlgo) == "string" and entry.hashAlgo or nil,
+      }
+    end
+  end
+
+  local meta = {
+    createdAt = os.date("%Y-%m-%d %H:%M:%S"),
+    complete = true,
+    fileCount = #files,
+    files = files,
+    context = type(context) == "table" and context or {},
+  }
+
+  return M.writeStagingMeta(stagingDir, meta)
+end
+
+function M.validateStaging(fileEntries, stagingDir, expectedContext)
+  if type(stagingDir) ~= "string" or stagingDir == "" then
+    return false, "invalid staging directory"
+  end
+
+  if not fs.exists(stagingDir) or not fs.isDir(stagingDir) then
+    return false, "staging directory missing: " .. tostring(stagingDir)
+  end
+
+  local meta, metaErr = M.readStagingMeta(stagingDir)
+  if not meta then
+    return false, "staging meta missing: " .. tostring(metaErr)
+  end
+
+  if meta.complete ~= true then
+    return false, "staging is not finalized"
+  end
+
+  if type(meta.files) ~= "table" then
+    return false, "staging meta invalid: files list missing"
+  end
+
+  local expectedList = listPaths(fileEntries)
+  local metaMap = mapByPath(meta.files)
+  if type(meta.fileCount) == "number" and meta.fileCount ~= #expectedList then
+    return false, "staging meta fileCount mismatch"
+  end
+
+  if type(expectedContext) == "table" then
+    local stagedContext = type(meta.context) == "table" and meta.context or {}
+    if type(expectedContext.remoteVersion) == "string" and expectedContext.remoteVersion ~= "" and stagedContext.remoteVersion ~= expectedContext.remoteVersion then
+      return false, "staging version mismatch"
+    end
+    if type(expectedContext.manifestVersion) == "string" and expectedContext.manifestVersion ~= "" and stagedContext.manifestVersion ~= expectedContext.manifestVersion then
+      return false, "staging manifest mismatch"
+    end
+  end
+
   for i, entry in ipairs(fileEntries or {}) do
     local path = normalizePath(entry.path)
     if path == "" then
       return false, "invalid manifest entry at index " .. tostring(i)
+    end
+
+    if not metaMap[path] then
+      return false, "staging meta missing path: " .. tostring(path)
     end
 
     local stagedPath = fs.combine(stagingDir, path)
@@ -112,6 +211,11 @@ function M.validateStaging(fileEntries, stagingDir)
       if size ~= entry.size then
         return false, "size mismatch in staging for " .. tostring(path)
       end
+    end
+
+    local stagedMeta = metaMap[path]
+    if type(stagedMeta.size) == "number" and stagedMeta.size >= 0 and type(entry.size) == "number" and entry.size >= 0 and stagedMeta.size ~= entry.size then
+      return false, "staging meta size mismatch for " .. tostring(path)
     end
   end
 

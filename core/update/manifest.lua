@@ -12,6 +12,13 @@ local function hasValue(s)
   return type(s) == "string" and string.find(s, "%S") ~= nil
 end
 
+local function normalizeHash(value)
+  if not hasValue(value) then
+    return nil
+  end
+  return string.lower(tostring(value))
+end
+
 local function decodeJson(text)
   local ok, data = pcall(textutils.unserializeJSON, text)
   if not ok then
@@ -38,9 +45,12 @@ local function normalizeFiles(list)
         path = normalizePath(entry),
       }
     elseif type(entry) == "table" then
+      local hash = normalizeHash(entry.hash or entry.sha256)
       item = {
         path = normalizePath(entry.path),
         size = tonumber(entry.size) and math.max(0, math.floor(tonumber(entry.size))) or nil,
+        hash = hash,
+        hashAlgo = hash and (hasValue(entry.hashAlgo) and tostring(entry.hashAlgo) or "sha256") or nil,
       }
     else
       return nil, "invalid file entry at index " .. tostring(i)
@@ -89,6 +99,16 @@ function M.validate(raw)
     source.rawBaseUrl = hasValue(raw.source.rawBaseUrl) and raw.source.rawBaseUrl or nil
   end
 
+  local integrity = {}
+  if type(raw.integrity) == "table" then
+    integrity.mode = hasValue(raw.integrity.mode) and tostring(raw.integrity.mode) or "size"
+    integrity.hashPlanned = raw.integrity.hashPlanned == true
+    integrity.hashAlgorithms = type(raw.integrity.hashAlgorithms) == "table" and raw.integrity.hashAlgorithms or nil
+  else
+    integrity.mode = "size"
+    integrity.hashPlanned = false
+  end
+
   return {
     name = tostring(raw.name),
     version = tostring(raw.version),
@@ -96,6 +116,7 @@ function M.validate(raw)
     entrypoint = normalizePath(raw.entrypoint),
     files = files,
     source = source,
+    integrity = integrity,
   }
 end
 
@@ -176,6 +197,8 @@ function M.computePendingFiles(localManifest, remoteManifest)
     elseif remoteEntry.size and currentSize and currentSize ~= remoteEntry.size then
       needsUpdate = true
     elseif localEntry and localEntry.size and remoteEntry.size and localEntry.size ~= remoteEntry.size then
+      needsUpdate = true
+    elseif localEntry and localEntry.hash and remoteEntry.hash and localEntry.hash ~= remoteEntry.hash then
       needsUpdate = true
     elseif not localEntry then
       needsUpdate = true
