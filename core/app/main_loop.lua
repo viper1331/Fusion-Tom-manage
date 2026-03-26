@@ -28,6 +28,13 @@ function M.run(ctx)
     elseif event == "tm_monitor_touch" then
       onTouch(ctx, p2, p3)
 
+    elseif event == "tm_monitor_resize" or event == "monitor_resize" or event == "term_resize" then
+      if type(ctx.handleResize) == "function" then
+        ctx.handleResize(event, p1, p2, p3)
+      else
+        ctx.render()
+      end
+
     elseif event == "peripheral" or event == "peripheral_detach" then
       ctx.invalidateWrapped(p1)
       ctx.pollLiveData(true)

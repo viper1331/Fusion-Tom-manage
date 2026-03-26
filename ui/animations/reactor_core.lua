@@ -1,4 +1,5 @@
 local M = {}
+local GpuSafe = assert(dofile("ui/helpers/gpu_safe.lua"))
 
 local CALIBRATION = {
   centerXRatio = 0.438,
@@ -90,14 +91,14 @@ local function resolveCoreState(data)
   return "running"
 end
 
-local function drawSoftEllipse(gpu, cx, cy, radiusX, radiusY, color)
+local function drawSoftEllipse(args, cx, cy, radiusX, radiusY, color)
   local rx = math.max(1, math.floor(radiusX))
   local ry = math.max(1, math.floor(radiusY))
   for dy = -ry, ry do
     local yNorm = dy / ry
     local span = math.floor(rx * math.sqrt(math.max(0, 1 - (yNorm * yNorm))))
     if span > 0 then
-      gpu.filledRectangle(cx - span, cy + dy, span * 2 + 1, 1, color)
+      GpuSafe.filledRect(args, cx - span, cy + dy, span * 2 + 1, 1, color)
     end
   end
 end
@@ -207,12 +208,18 @@ function M.draw(args, x, y, w, h, data)
   local coreState = resolveCoreState(data)
   local style = buildStateStyle(data, coreState, frame)
   local ui = args.ui or {}
+  local visual = args.state and args.state.visual
 
   local scale = 1.00
   if ui.micro then
     scale = CALIBRATION.microScale
   elseif ui.compact then
     scale = CALIBRATION.compactScale
+  end
+  if visual and visual.effectLevel == "lite" then
+    scale = scale * 0.92
+  elseif visual and visual.effectLevel == "minimal" then
+    scale = scale * 0.80
   end
 
   local cx = x + math.floor(w * CALIBRATION.centerXRatio)
@@ -231,35 +238,45 @@ function M.draw(args, x, y, w, h, data)
   local innerRx = math.max(2, math.floor(baseRadiusX * 1.20 * haloFactor))
   local innerRy = math.max(2, math.floor(baseRadiusY * 1.25 * haloFactor))
 
-  drawSoftEllipse(gpu, cx, cy, outerRx, outerRy, style.outer)
-  drawSoftEllipse(gpu, cx, cy, midRx, midRy, style.mid)
-  drawSoftEllipse(gpu, cx, cy, innerRx, innerRy, style.inner)
+  drawSoftEllipse(args, cx, cy, outerRx, outerRy, style.outer)
+  drawSoftEllipse(args, cx, cy, midRx, midRy, style.mid)
+  drawSoftEllipse(args, cx, cy, innerRx, innerRy, style.inner)
 
   local coreRx = math.max(1, math.floor(innerRx * (ui.micro and 0.42 or 0.48)))
   local coreRy = math.max(1, math.floor(innerRy * (ui.micro and 0.45 or 0.52)))
-  drawSoftEllipse(gpu, cx, cy, coreRx, coreRy, style.core)
-  drawSoftEllipse(gpu, cx, cy - 1, math.max(1, coreRx - 1), math.max(1, coreRy - 1), 0xAAFFFFFF)
+  drawSoftEllipse(args, cx, cy, coreRx, coreRy, style.core)
+  drawSoftEllipse(args, cx, cy - 1, math.max(1, coreRx - 1), math.max(1, coreRy - 1), 0xAAFFFFFF)
 
   if style.sparkCount > 0 then
     local sparkRadiusX = math.max(1, math.floor(innerRx * 1.08))
     local sparkRadiusY = math.max(1, math.floor(innerRy * 1.12))
     local sparkSize = ui.micro and 1 or 2
+    if visual and visual.effectLevel == "lite" then
+      sparkSize = 1
+    end
 
-    for i = 1, style.sparkCount do
+    local sparkCount = style.sparkCount
+    if visual and visual.effectLevel == "lite" then
+      sparkCount = math.max(1, math.floor(sparkCount * 0.65))
+    elseif visual and visual.effectLevel == "minimal" then
+      sparkCount = math.max(0, math.floor(sparkCount * 0.35))
+    end
+
+    for i = 1, sparkCount do
       local angle = ((frame * 0.17) + (i * 0.92)) * 1.27
       local jitter = 0.75 + pulseWave(frame + (i * 3), style.pulsePeriod + i) * 0.45
       local sx = cx + math.floor(math.cos(angle) * sparkRadiusX * jitter)
       local sy = cy + math.floor(math.sin(angle) * sparkRadiusY * jitter)
-      gpu.filledRectangle(sx, sy, sparkSize, sparkSize, style.spark)
+      GpuSafe.filledRect(args, sx, sy, sparkSize, sparkSize, style.spark)
     end
   end
 
   if coreState == "warning" and (frame % 3 == 0) then
-    drawSoftEllipse(gpu, cx, cy, math.max(2, coreRx + 1), math.max(2, coreRy + 1), 0x2AFFFFFF)
+    drawSoftEllipse(args, cx, cy, math.max(2, coreRx + 1), math.max(2, coreRy + 1), 0x2AFFFFFF)
   elseif coreState == "ignition" and (frame % 4 <= 1) then
-    drawSoftEllipse(gpu, cx, cy - 1, math.max(1, coreRx - 1), 1, 0x48FFFFFF)
+    drawSoftEllipse(args, cx, cy - 1, math.max(1, coreRx - 1), 1, 0x48FFFFFF)
   elseif coreState == "scram" then
-    drawSoftEllipse(gpu, cx, cy + math.max(1, coreRy), math.max(1, coreRx - 1), 1, 0x402E5A84)
+    drawSoftEllipse(args, cx, cy + math.max(1, coreRy), math.max(1, coreRx - 1), 1, 0x402E5A84)
   end
 end
 

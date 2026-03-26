@@ -1,4 +1,5 @@
 local M = {}
+local GpuSafe = assert(dofile("ui/helpers/gpu_safe.lua"))
 
 local CALIBRATION = {
   module = {
@@ -85,6 +86,22 @@ local function resolveDensity(ui)
     return 0.75
   end
   return 1.00
+end
+
+local function effectiveDensity(args, baseDensity)
+  local density = baseDensity
+  local visual = args and args.state and args.state.visual
+  if visual and visual.effectLevel == "lite" then
+    density = density * 0.70
+  elseif visual and visual.effectLevel == "minimal" then
+    density = density * 0.45
+  end
+  return math.max(0.25, density)
+end
+
+local function safeFilledRect(args, x, y, w, h, color)
+  local ok = GpuSafe.filledRect(args, x, y, w, h, color)
+  return ok
 end
 
 local function resolveFlowIntensity(data, mode)
@@ -187,14 +204,13 @@ local function drawHorizontalParticleFlow(args, spec)
   local thickness = math.max(1, spec.thickness or 1)
   local y = spec.y
   local reverse = spec.reverse == true
-  local gpu = args.gpu
   local frame = (args.state and args.state.animTick) or 0
-  local density = resolveDensity(args.ui)
+  local density = effectiveDensity(args, resolveDensity(args.ui))
   local intensity = spec.intensity or 1
   local style = getFlowStyle(mode)
 
   local lineW = math.max(1, x2 - x1 + 1)
-  gpu.filledRectangle(x1, y - math.floor(thickness / 2), lineW, thickness, style.baseGlow)
+  safeFilledRect(args, x1, y - math.floor(thickness / 2), lineW, thickness, style.baseGlow)
 
   local travel = math.max(4, x2 - x1)
   local packetScale = spec.particleScale or (args.ui and args.ui.micro and 0.75 or 0.95)
@@ -216,24 +232,24 @@ local function drawHorizontalParticleFlow(args, spec)
     for t = trailSteps, 1, -1 do
       local tx = px + (direction * t * trailStep)
       if tx >= x1 and tx <= x2 then
-        gpu.filledRectangle(tx, py, packetW, packetH, style.trail)
+        safeFilledRect(args, tx, py, packetW, packetH, style.trail)
       end
     end
 
-    gpu.filledRectangle(px, py, packetW, packetH, style.particle)
+    safeFilledRect(args, px, py, packetW, packetH, style.particle)
 
     if mode == "firing" and ((frame + i) % 2 == 0) then
-      gpu.filledRectangle(px, py, math.max(1, packetW - 1), math.max(1, packetH - 1), 0xCCFFFFFF)
+      safeFilledRect(args, px, py, math.max(1, packetW - 1), math.max(1, packetH - 1), 0xCCFFFFFF)
     end
   end
 
   if mode == "ready" or mode == "running" then
     if (math.floor(frame / 5) % 2) == 0 then
       local mx = reverse and x1 or x2
-      gpu.filledRectangle(mx - 1, y - 2, 4, 5, style.marker)
+      safeFilledRect(args, mx - 1, y - 2, 4, 5, style.marker)
     end
   elseif mode == "firing" and (frame % 3 == 0) then
-    gpu.filledRectangle(x1, y - math.max(1, math.floor(thickness / 2)), lineW, math.max(1, thickness + 1), 0x30FFFFFF)
+    safeFilledRect(args, x1, y - math.max(1, math.floor(thickness / 2)), lineW, math.max(1, thickness + 1), 0x30FFFFFF)
   end
 end
 
@@ -252,9 +268,8 @@ local function drawVerticalParticleFlow(args, spec)
   local x = spec.x
   local thickness = math.max(1, spec.thickness or 1)
   local reverse = spec.reverse == true
-  local gpu = args.gpu
   local frame = (args.state and args.state.animTick) or 0
-  local density = resolveDensity(args.ui)
+  local density = effectiveDensity(args, resolveDensity(args.ui))
   local intensity = spec.intensity or 1
   local style = getFlowStyle(mode)
 
@@ -268,7 +283,7 @@ local function drawVerticalParticleFlow(args, spec)
   local lineH = math.max(1, y2 - y1 + 1)
   local axisThickness = math.max(1, spec.axisThickness or thickness)
   if spec.drawBaseLine ~= false then
-    gpu.filledRectangle(x - math.floor(axisThickness / 2), y1, axisThickness, lineH, axisGlow)
+    safeFilledRect(args, x - math.floor(axisThickness / 2), y1, axisThickness, lineH, axisGlow)
   end
 
   local travel = math.max(4, y2 - y1)
@@ -287,11 +302,11 @@ local function drawVerticalParticleFlow(args, spec)
     for t = trailSteps, 1, -1 do
       local ty = py + (direction * t * trailStep)
       if ty >= y1 and ty <= y2 then
-        gpu.filledRectangle(px, ty, packetW, packetH, trailColor)
+        safeFilledRect(args, px, ty, packetW, packetH, trailColor)
       end
     end
 
-    gpu.filledRectangle(px, py, packetW, packetH, packetColor)
+    safeFilledRect(args, px, py, packetW, packetH, packetColor)
   end
 end
 

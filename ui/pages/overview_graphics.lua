@@ -2,13 +2,14 @@ local M = {}
 
 local ElectricFlowAnimation = assert(dofile("ui/animations/electric_flow.lua"))
 local ReactorCoreAnimation = assert(dofile("ui/animations/reactor_core.lua"))
+local GpuSafe = assert(dofile("ui/helpers/gpu_safe.lua"))
 
-local function drawImageSafe(gpu, img, x, y)
+local function drawImageSafe(args, img, x, y)
   if not img then
     return
   end
 
-  gpu.drawImage(x, y, img.ref())
+  GpuSafe.drawImage(args, img, x, y)
 end
 
 local function drawModuleCableFluxAt(args, x, y, w, h, data)
@@ -41,11 +42,18 @@ function M.drawImageStack(args)
   local chooseStackLayout = args.chooseStackLayout
   local drawTextCenter = args.drawTextCenter
   local textPixelHeight = args.textPixelHeight
+  local safeRect = function(x, y, w, h, color)
+    GpuSafe.filledRect(args, x, y, w, h, color)
+  end
+
+  if slotW <= 0 or slotH <= 0 then
+    return
+  end
 
   local configuredModuleCount = math.max(1, tonumber(control.laserModuleCount) or 1)
   local layout = forcedLayout or chooseStackLayout(slotW, slotH, configuredModuleCount)
 
-  gpu.filledRectangle(slotX, slotY, slotW, slotH, C.white)
+  safeRect(slotX, slotY, slotW, slotH, C.white)
 
   if not layout or not layout.reactor then
     local ty = slotY + math.max(0, math.floor((slotH - textPixelHeight(1)) / 2))
@@ -79,7 +87,7 @@ function M.drawImageStack(args)
     for i = 1, drawnModuleCount do
       local moduleX = slotX + math.floor((slotW - moduleVariant.width) / 2)
       local moduleY = startY + ((i - 1) * (moduleVariant.height + moduleGap))
-      drawImageSafe(gpu, moduleVariant.image, moduleX, moduleY)
+      drawImageSafe(args, moduleVariant.image, moduleX, moduleY)
       drawModuleCableFluxAt(args, moduleX, moduleY, moduleVariant.width, moduleVariant.height, data)
     end
     startY = startY + modulesBlockH + gap
@@ -90,7 +98,7 @@ function M.drawImageStack(args)
   end
 
   local reactorX = slotX + math.floor((slotW - reactorVariant.width) / 2)
-  drawImageSafe(gpu, reactorVariant.image, reactorX, startY)
+  drawImageSafe(args, reactorVariant.image, reactorX, startY)
   drawReactorCoreAnimationAt(args, reactorX, startY, reactorVariant.width, reactorVariant.height, data)
   drawReactorRightCableFluxAt(args, reactorX, startY, reactorVariant.width, reactorVariant.height, data)
   drawReactorBottomGasFluxAt(args, reactorX, startY, reactorVariant.width, reactorVariant.height, data)
@@ -101,8 +109,8 @@ function M.drawImageStack(args)
     local badgeX = slotX + slotW - badgeW - 1
     local badgeY = slotY + 1
 
-    gpu.filledRectangle(badgeX, badgeY, badgeW, badgeH, C.panel2 or C.panel)
-    gpu.rectangle(badgeX, badgeY, badgeW, badgeH, C.border)
+    safeRect(badgeX, badgeY, badgeW, badgeH, C.panel2 or C.panel)
+    GpuSafe.rectangle(args, badgeX, badgeY, badgeW, badgeH, C.border)
     drawTextCenter(badgeX, badgeY + math.max(0, math.floor((badgeH - textPixelHeight(1)) / 2)), badgeW, "x" .. tostring(configuredCount), C.muted, 1)
   end
 end

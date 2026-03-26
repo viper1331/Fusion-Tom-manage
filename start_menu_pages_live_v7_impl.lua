@@ -131,6 +131,7 @@ local START_PAGE = DEFAULTS.ui.startPage
 local UPDATE_VERSION_FILE = "fusion.version"
 local UPDATE_MANIFEST_FILE = "fusion.manifest.json"
 local UPDATE_LOG_FILE = "update.log"
+local UI_RUNTIME_LOG_FILE = "ui_runtime.log"
 local UPDATE_TEMP_DIR = "update_tmp"
 local UPDATE_BACKUP_DIR = "backup_last"
 
@@ -327,6 +328,14 @@ local state = {
   animTick = 0,
   restartRequested = false,
   restartTarget = nil,
+  visual = {
+    effectLevel = "normal",
+    vramFallback = false,
+    screenSize = "n/a",
+    reactorAsset = "none",
+    moduleAsset = "none",
+    lastAssetReason = "startup",
+  },
 
   update = {
     localVersion = "n/a",
@@ -409,6 +418,10 @@ local images = {
 
 local buttons = {}
 local ui = nil
+local displayState = {
+  lastWidth = -1,
+  lastHeight = -1,
+}
 
 local PAGES = {
   { id = "OVERVIEW", label = "OVERVIEW" },
@@ -452,6 +465,33 @@ end
 
 local function textPixelHeight(size)
   return 8 * (size or 1)
+end
+
+local function runtimeNowText()
+  local ok, value = pcall(os.date, "%Y-%m-%d %H:%M:%S")
+  if ok and type(value) == "string" and value ~= "" then
+    return value
+  end
+  if os.epoch then
+    return tostring(os.epoch("utc"))
+  end
+  return tostring(math.floor((os.clock() or 0) * 1000))
+end
+
+local function appendUiRuntimeLog(message)
+  local entry = "[" .. runtimeNowText() .. "] " .. tostring(message or "event")
+  local fh = fs.open(UI_RUNTIME_LOG_FILE, "a")
+  if fh then
+    fh.writeLine(entry)
+    fh.close()
+  end
+end
+
+local function isVramError(err)
+  local low = string.lower(tostring(err or ""))
+  return string.find(low, "vram", 1, true) ~= nil
+    or string.find(low, "alloc failed", 1, true) ~= nil
+    or string.find(low, "out of memory", 1, true) ~= nil
 end
 
 local function readAllBytes(path)
@@ -514,75 +554,188 @@ local function sortLaserModuleVariants()
   sortVariantList(images.laserModuleVariants)
 end
 
-local function tryLoadAssets()
+local function normalizeAssetVariants(rawVariants, fallbackPrefix)
+  local out = {}
+  for index, variant in ipairs(rawVariants or {}) do
+    local name = nil
+    local path = nil
+    if type(variant) == "table" then
+      name = variant.name
+      path = variant.path
+    elseif type(variant) == "string" then
+      name = (fallbackPrefix or "variant") .. "_" .. tostring(index)
+      path = variant
+    end
+
+    if type(path) == "string" and path ~= "" then
+      out[#out + 1] = {
+        index = index,
+        name = name or ((fallbackPrefix or "variant") .. "_" .. tostring(index)),
+        path = path,
+      }
+    end
+  end
+  return out
+end
+
+local function findVariantIndexByName(variants, preferredName)
+  if type(preferredName) ~= "string" or preferredName == "" then
+    return nil
+  end
+  for index, variant in ipairs(variants) do
+    if variant.name == preferredName then
+      return index
+    end
+  end
+  return nil
+end
+
+local function preferredReactorVariantName()
+  if not ui then
+    return "trim_small2"
+  end
+  if ui.micro then
+    return "trim_tiny"
+  end
+  if ui.compact then
+    return "trim_small2"
+  end
+  if ui.sw >= 1300 and ui.sh >= 900 then
+    return "trim_large"
+  end
+  return "trim_medium"
+end
+
+local function preferredModuleVariantName()
+  if not ui then
+    return "small2"
+  end
+  if ui.micro then
+    return "tiny"
+  end
+  if ui.compact then
+    return "small2"
+  end
+  if ui.sw >= 1300 and ui.sh >= 900 then
+    return "large"
+  end
+  return "medium"
+end
+
+local function buildVariantLoadOrder(variants, preferredIndex)
+  local order = {}
+  if #variants < 1 then
+    return order
+  end
+
+  local startAt = math.max(1, math.min(#variants, preferredIndex or #variants))
+  for index = startAt, 1, -1 do
+    order[#order + 1] = index
+  end
+  for index = startAt + 1, #variants do
+    order[#order + 1] = index
+  end
+  return order
+end
+
+local function loadVariantWithFallback(kindLabel, rawVariants, preferredName)
+  local variants = normalizeAssetVariants(rawVariants, kindLabel)
+  if #variants < 1 then
+    appendUiRuntimeLog("asset " .. tostring(kindLabel) .. ": no variants configured")
+    return nil, false, false
+  end
+
+  local preferredIndex = findVariantIndexByName(variants, preferredName) or #variants
+  local order = buildVariantLoadOrder(variants, preferredIndex)
+  local sawVramError = false
+  local usedFallback = false
+
+  for orderPos, variantIndex in ipairs(order) do
+    local variant = variants[variantIndex]
+    local img, err = loadPng(variant.path)
+    if img then
+      local selected = {
+        name = variant.name,
+        path = variant.path,
+        image = img,
+        width = img.getWidth(),
+        height = img.getHeight(),
+      }
+      usedFallback = orderPos > 1
+      if usedFallback then
+        appendUiRuntimeLog("asset " .. tostring(kindLabel) .. ": fallback to " .. tostring(selected.name) .. " after failure")
+      end
+      appendUiRuntimeLog("asset " .. tostring(kindLabel) .. ": selected " .. tostring(selected.name) .. " (" .. tostring(selected.width) .. "x" .. tostring(selected.height) .. ")")
+      return selected, sawVramError, usedFallback
+    end
+
+    if isVramError(err) then
+      sawVramError = true
+      appendUiRuntimeLog("asset " .. tostring(kindLabel) .. ": VRAM error on " .. tostring(variant.name) .. " -> " .. tostring(err))
+    else
+      appendUiRuntimeLog("asset " .. tostring(kindLabel) .. ": decode error on " .. tostring(variant.name) .. " -> " .. tostring(err))
+    end
+  end
+
+  appendUiRuntimeLog("asset " .. tostring(kindLabel) .. ": disabled (no variant loadable)")
+  return nil, sawVramError, usedFallback
+end
+
+local function refreshVisualEffectLevel()
+  local level = "normal"
+  if ui and ui.micro then
+    level = "minimal"
+  elseif state.visual.vramFallback or not images.reactor or not images.laserModule then
+    level = "lite"
+  elseif ui and ui.compact then
+    level = "lite"
+  end
+  state.visual.effectLevel = level
+  appendUiRuntimeLog("effects level: " .. tostring(level))
+end
+
+local function tryLoadAssets(reason)
+  reason = tostring(reason or "manual")
+  appendUiRuntimeLog("asset reload start: reason=" .. reason .. ", screen=" .. tostring(ui and (ui.sw .. "x" .. ui.sh) or "n/a"))
+
   images.reactorVariants = {}
   images.reactor = nil
   images.laserModuleVariants = {}
   images.laserModule = nil
+  pcall(collectgarbage, "collect")
 
-  for index, variant in ipairs(ASSET_REACTOR_VARIANTS) do
-    local name, path
-
-    if type(variant) == "table" then
-      name = variant.name or ("variant_" .. tostring(index))
-      path = variant.path
-    elseif type(variant) == "string" then
-      name = "variant_" .. tostring(index)
-      path = variant
-    end
-
-    if type(path) == "string" and path ~= "" then
-      local img, err = loadPng(path)
-      if img then
-        table.insert(images.reactorVariants, {
-          name = name,
-          path = path,
-          image = img,
-          width = img.getWidth(),
-          height = img.getHeight(),
-        })
-      elseif name == "base" then
-        print("Asset reactor indisponible: " .. tostring(err))
-      end
-    end
+  local reactorVariant, reactorVramError = loadVariantWithFallback(
+    "reactor",
+    ASSET_REACTOR_VARIANTS,
+    preferredReactorVariantName()
+  )
+  if reactorVariant then
+    images.reactorVariants = { reactorVariant }
+    images.reactor = reactorVariant.image
+  else
+    images.reactorVariants = {}
+    images.reactor = nil
   end
 
-  if #images.reactorVariants > 0 then
-    sortReactorVariants()
-    images.reactor = images.reactorVariants[#images.reactorVariants].image
+  local moduleVariant, moduleVramError = loadVariantWithFallback(
+    "laser_module",
+    ASSET_LASER_MODULE_VARIANTS,
+    preferredModuleVariantName()
+  )
+  if moduleVariant then
+    images.laserModuleVariants = { moduleVariant }
+    images.laserModule = moduleVariant.image
+  else
+    images.laserModuleVariants = {}
+    images.laserModule = nil
   end
 
-  for index, variant in ipairs(ASSET_LASER_MODULE_VARIANTS) do
-    local name, path
-
-    if type(variant) == "table" then
-      name = variant.name or ("laser_variant_" .. tostring(index))
-      path = variant.path
-    elseif type(variant) == "string" then
-      name = "laser_variant_" .. tostring(index)
-      path = variant
-    end
-
-    if type(path) == "string" and path ~= "" then
-      local img, err = loadPng(path)
-      if img then
-        table.insert(images.laserModuleVariants, {
-          name = name,
-          path = path,
-          image = img,
-          width = img.getWidth(),
-          height = img.getHeight(),
-        })
-      else
-        print("Asset module laser indisponible: " .. tostring(err))
-      end
-    end
-  end
-
-  if #images.laserModuleVariants > 0 then
-    sortLaserModuleVariants()
-    images.laserModule = images.laserModuleVariants[#images.laserModuleVariants].image
-  end
+  state.visual.reactorAsset = reactorVariant and reactorVariant.name or "none"
+  state.visual.moduleAsset = moduleVariant and moduleVariant.name or "none"
+  state.visual.vramFallback = reactorVramError or moduleVramError
+  state.visual.lastAssetReason = reason
+  refreshVisualEffectLevel()
+  pcall(collectgarbage, "collect")
 end
 
 local function getFallbackReactorVariant()
@@ -830,6 +983,15 @@ local function buildUI()
   gpu.setSize(GPU_MODE)
 
   local sw, sh = gpu.getSize()
+  local sizeChanged = (sw ~= displayState.lastWidth) or (sh ~= displayState.lastHeight)
+  if sizeChanged then
+    appendUiRuntimeLog("screen size detected: " .. tostring(sw) .. "x" .. tostring(sh))
+    displayState.lastWidth = sw
+    displayState.lastHeight = sh
+    state.visual.screenSize = tostring(sw) .. "x" .. tostring(sh)
+    state.live.cache = nil
+  end
+
   local scale = math.min(sw / 900, sh / 1400)
   scale = clamp(scale, 0.40, 2.20)
 
@@ -888,6 +1050,8 @@ local function buildUI()
     w = sw - m * 2,
     h = bodyBottom - bodyTop,
   }
+
+  return sizeChanged
 end
 
 local function splitVertical(r, topRatio, gap)
@@ -2381,6 +2545,7 @@ local function readFusionData(force)
 end
 
 local appWiring = nil
+local render = nil
 
 local function setPage(pageId)
   AppRouter.setPage(appWiring.router, pageId)
@@ -2390,8 +2555,25 @@ local function handleAction(action)
   AppRouter.handleAction(appWiring.router, action)
 end
 
-local function render()
-  buildUI()
+local function handleResize(eventName, p1)
+  local previousSize = state.visual.screenSize
+  local sizeChanged = buildUI()
+  if sizeChanged then
+    appendUiRuntimeLog("resize event: " .. tostring(eventName) .. " (" .. tostring(p1 or "n/a") .. ") " .. tostring(previousSize) .. " -> " .. tostring(state.visual.screenSize))
+    tryLoadAssets("event:" .. tostring(eventName))
+    state.message = "resize: " .. tostring(state.visual.screenSize)
+  else
+    appendUiRuntimeLog("resize event: " .. tostring(eventName) .. " (no size change)")
+  end
+  render()
+end
+
+render = function()
+  local sizeChanged = buildUI()
+  if sizeChanged then
+    tryLoadAssets("auto-resize:" .. tostring(state.visual.screenSize))
+    state.message = "screen resized: " .. tostring(state.visual.screenSize)
+  end
   buttons = {}
 
   if ui.tooSmall then
@@ -2450,6 +2632,7 @@ appWiring = AppBootstrap.buildWiring({
   invalidateWrapped = invalidateWrapped,
   hit = hit,
   handleAction = handleAction,
+  handleResize = handleResize,
   render = render,
   getButtons = function()
     return buttons

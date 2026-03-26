@@ -41,6 +41,7 @@ function M.buildWiring(args)
       getButtons = args.getButtons,
       hit = args.hit,
       handleAction = args.handleAction,
+      handleResize = args.handleResize,
     },
   }
 end
