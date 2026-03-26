@@ -1841,6 +1841,14 @@ local function setDownloadedState(flag, count)
   end
 end
 
+local function parseSizeMismatchDetail(raw)
+  local path = string.match(raw, "size mismatch for ([^:]+)")
+  local expected = string.match(raw, "expected=([0-9]+)")
+  local received = string.match(raw, "received=([0-9]+)")
+  local url = string.match(raw, "url=(%S+)")
+  return path, expected, received, url
+end
+
 local function formatUpdateUserError(step, err)
   local raw = firstLine(err or "unknown error")
   local lower = string.lower(raw)
@@ -1858,6 +1866,11 @@ local function formatUpdateUserError(step, err)
     return step .. ": staging is invalid or incomplete. Run DOWNLOAD again."
   end
   if string.find(lower, "size mismatch", 1, true) then
+    local path, expected, received = parseSizeMismatchDetail(raw)
+    if path and expected and received then
+      return step .. ": integrity mismatch on " .. tostring(path)
+        .. " (expected " .. tostring(expected) .. " bytes, got " .. tostring(received) .. ")."
+    end
     return step .. ": file integrity check failed (size mismatch)."
   end
   if string.find(lower, "manifest", 1, true) then

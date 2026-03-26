@@ -1,6 +1,6 @@
 {
     "name":  "Fusion-Tom-manage",
-    "version":  "1.2.1",
+    "version":  "1.2.2",
     "channel":  "stable",
     "entrypoint":  "start_menu_pages_live_v7.lua",
     "source":  {
@@ -19,19 +19,19 @@
     "files":  [
                   {
                       "path":  "start_menu_pages_live_v7.lua",
-                      "size":  100770
+                      "size":  99363
                   },
                   {
                       "path":  "install.lua",
-                      "size":  9609
+                      "size":  9384
                   },
                   {
                       "path":  "fusion_config.lua",
-                      "size":  1182
+                      "size":  1160
                   },
                   {
                       "path":  "fusion.version",
-                      "size":  7
+                      "size":  6
                   },
                   {
                       "path":  "fusion.manifest.json"
@@ -46,7 +46,7 @@
                   },
                   {
                       "path":  "core/update/client.lua",
-                      "size":  4064
+                      "size":  4562
                   },
                   {
                       "path":  "core/update/apply.lua",

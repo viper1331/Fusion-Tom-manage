@@ -74,8 +74,8 @@ function M.fetchBinary(url)
   return M.fetch(url, true)
 end
 
-function M.downloadFile(source, relativePath, destinationPath, entry)
-  local url = M.buildRawUrl(source, relativePath)
+function M.downloadFile(source, relativePath, destinationPath, entry, resolvedUrl)
+  local url = resolvedUrl or M.buildRawUrl(source, relativePath)
   local payload, err = M.fetchBinary(url)
   if not payload then
     return nil, "download failed for " .. tostring(relativePath) .. ": " .. tostring(err)
@@ -119,19 +119,30 @@ function M.downloadFiles(source, fileEntries, targetDir, logger)
     end
 
     local normalizedPath = normalizePath(relativePath)
+    local requestedUrl = M.buildRawUrl(source, normalizedPath)
+    if logger then
+      logger("downloading " .. tostring(normalizedPath) .. " <- " .. tostring(requestedUrl))
+    end
     local destination = fs.combine(targetDir, normalizedPath)
-    local downloaded, err = M.downloadFile(source, normalizedPath, destination, entry)
+    local downloaded, err = M.downloadFile(source, normalizedPath, destination, entry, requestedUrl)
     if not downloaded then
       return nil, err
     end
 
     if type(entry.size) == "number" and entry.size >= 0 and downloaded.size ~= entry.size then
-      return nil, "size mismatch for " .. tostring(normalizedPath)
+      local mismatch = "size mismatch for " .. tostring(normalizedPath)
+        .. ": expected=" .. tostring(entry.size)
+        .. ", received=" .. tostring(downloaded.size)
+        .. ", url=" .. tostring(downloaded.url)
+      if logger then
+        logger(mismatch)
+      end
+      return nil, mismatch
     end
 
     out[#out + 1] = downloaded
     if logger then
-      logger("downloaded " .. tostring(downloaded.path) .. " (" .. tostring(downloaded.size) .. " bytes)")
+      logger("downloaded " .. tostring(downloaded.path) .. " (" .. tostring(downloaded.size) .. " bytes) from " .. tostring(downloaded.url))
       if downloaded.hash then
         logger("integrity hint present for " .. tostring(downloaded.path) .. " (" .. tostring(downloaded.hashAlgo or "hash") .. ", verification pending implementation)")
       end
