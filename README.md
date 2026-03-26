@@ -5,7 +5,10 @@ Interface de gestion de reacteur a fusion Mekanism pour CC:Tweaked + Tom's Perip
 ## Lancement
 
 1. Configurer avec `lua install.lua`
-2. Lancer l'interface avec `lua start_menu_pages_live_v7.lua`
+2. Lancer l'interface avec `lua start.lua`
+
+Compatibilite legacy:
+- `lua start_menu_pages_live_v7.lua` reste supporte temporairement (shim vers `start.lua`).
 
 ## Mise a jour integree (page MAJ)
 

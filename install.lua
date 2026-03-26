@@ -1,9 +1,9 @@
 -- install.lua
 -- Assistant de configuration Fusion Reactor UI
--- Cree fusion_config.lua pour start_menu_pages_live_v7.lua
+-- Cree fusion_config.lua pour start.lua
 
 local CONFIG_FILE = "fusion_config.lua"
-local MAIN_SCRIPT = "start_menu_pages_live_v7.lua"
+local MAIN_SCRIPT = "start.lua"
 
 local defaults = {
   devices = {
