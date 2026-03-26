@@ -60,12 +60,48 @@ local function buildTemplateBaseUrl(source)
   return base
 end
 
+local function isUnreservedByte(byte)
+  return (byte >= 48 and byte <= 57) -- 0-9
+    or (byte >= 65 and byte <= 90)   -- A-Z
+    or (byte >= 97 and byte <= 122)  -- a-z
+    or byte == 45                    -- -
+    or byte == 46                    -- .
+    or byte == 95                    -- _
+    or byte == 126                   -- ~
+end
+
+local function encodePathSegment(segment)
+  local out = {}
+  for i = 1, #segment do
+    local byte = string.byte(segment, i)
+    if isUnreservedByte(byte) then
+      out[#out + 1] = string.char(byte)
+    else
+      out[#out + 1] = string.format("%%%02X", byte)
+    end
+  end
+  return table.concat(out)
+end
+
+local function encodeRelativePathForUrl(path)
+  local normalized = normalizePath(path)
+  if normalized == "" then
+    return ""
+  end
+
+  local encodedParts = {}
+  for part in string.gmatch(normalized, "[^/]+") do
+    encodedParts[#encodedParts + 1] = encodePathSegment(part)
+  end
+  return table.concat(encodedParts, "/")
+end
+
 function M.isHttpEnabled()
   return type(http) == "table" and type(http.get) == "function"
 end
 
 function M.buildRawUrl(source, relativePath)
-  local rel = normalizePath(relativePath)
+  local rel = encodeRelativePathForUrl(relativePath)
   local rawBaseUrl = source and source.rawBaseUrl
 
   if type(rawBaseUrl) == "string" and rawBaseUrl ~= "" then
@@ -115,7 +151,7 @@ function M.downloadFile(source, relativePath, destinationPath, entry, resolvedUr
   local url = resolvedUrl or M.buildRawUrl(source, relativePath)
   local payload, err = M.fetchBinary(url)
   if not payload then
-    return nil, "download failed for " .. tostring(relativePath) .. ": " .. tostring(err)
+    return nil, "download failed for " .. tostring(relativePath) .. ": " .. tostring(err) .. " (url=" .. tostring(url) .. ")"
   end
 
   ensureParent(destinationPath)

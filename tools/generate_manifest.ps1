@@ -71,6 +71,19 @@ foreach ($entry in $manifest.files) {
   if ([string]::IsNullOrWhiteSpace($path)) {
     throw "Manifest entry with size has empty path"
   }
+  if ($path.Trim() -ne $path) {
+    throw "Manifest path has leading/trailing spaces: '$path'"
+  }
+
+  $normalizedPath = $path -replace '\\', '/'
+  if ($normalizedPath -ne $path) {
+    $entry.path = $normalizedPath
+    $path = $normalizedPath
+  }
+
+  if ($path -match "\s") {
+    Write-Host "warning: manifest path contains spaces (URL encoding required): $path"
+  }
 
   $sizeText = $null
   if ($treeishMode -eq "INDEX") {

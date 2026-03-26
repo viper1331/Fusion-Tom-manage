@@ -1,6 +1,6 @@
 {
     "name":  "Fusion-Tom-manage",
-    "version":  "1.2.3",
+    "version":  "1.2.4",
     "channel":  "stable",
     "entrypoint":  "start_menu_pages_live_v7.lua",
     "source":  {
@@ -8,7 +8,7 @@
                    "repo":  "Fusion-Tom-manage",
                    "branch":  "main",
                    "manifestPath":  "fusion.manifest.json",
-                   "commit":  "9703366914b7c83c60a9f4491c6324ee2bd38015"
+                   "commit":  "1a561a8b0bca232daa4be06e957d93bf37f22b9b"
                },
     "integrity":  {
                       "mode":  "size",
@@ -20,7 +20,7 @@
     "files":  [
                   {
                       "path":  "start_menu_pages_live_v7.lua",
-                      "size":  105194
+                      "size":  105320
                   },
                   {
                       "path":  "install.lua",
@@ -47,7 +47,7 @@
                   },
                   {
                       "path":  "core/update/client.lua",
-                      "size":  5571
+                      "size":  6595
                   },
                   {
                       "path":  "core/update/apply.lua",
@@ -90,10 +90,6 @@
                       "size":  2255
                   },
                   {
-                      "path":  "assets/module laser.png",
-                      "size":  56154
-                  },
-                  {
                       "path":  "assets/reactor_top.png",
                       "size":  371025
                   },
@@ -126,5 +122,5 @@
                       "size":  19070
                   }
               ],
-    "commit":  "9703366914b7c83c60a9f4491c6324ee2bd38015"
+    "commit":  "1a561a8b0bca232daa4be06e957d93bf37f22b9b"
 }

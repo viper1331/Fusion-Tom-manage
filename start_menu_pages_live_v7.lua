@@ -1886,6 +1886,9 @@ local function formatUpdateUserError(step, err)
   if string.find(lower, "http 404", 1, true) then
     return step .. ": remote file not found (404). Check owner/repo/branch/manifestPath."
   end
+  if string.find(lower, "url malformed", 1, true) then
+    return step .. ": invalid download URL (path/source issue)."
+  end
   if string.find(lower, "source incomplete", 1, true) then
     return step .. ": update source is incomplete (owner/repo/branch/commit)."
   end
