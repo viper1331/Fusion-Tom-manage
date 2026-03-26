@@ -1,32 +1,121 @@
 {
-  "name": "Fusion-Tom-manage",
-  "version": "1.1.0",
-  "entrypoint": "start_menu_pages_live_v7.lua",
-  "installer": "install.lua",
-  "config": "fusion_config.lua",
-  "scripts": [
-    "start_menu_pages_live_v7.lua",
-    "install.lua",
-    "fusion_config.lua",
-    "gpu_debug.lua",
-    "tp_mek_scan.lua"
-  ],
-  "assets": [
-    "assets/laser_module_large.png",
-    "assets/laser_module_medium.png",
-    "assets/laser_module_micro.png",
-    "assets/laser_module_small.png",
-    "assets/laser_module_small2.png",
-    "assets/laser_module_tiny.png",
-    "assets/laser_module_xsmall.png",
-    "assets/module laser.png",
-    "assets/reactor_top.png",
-    "assets/reactor_top_trim_large.png",
-    "assets/reactor_top_trim_medium.png",
-    "assets/reactor_top_trim_micro.png",
-    "assets/reactor_top_trim_small.png",
-    "assets/reactor_top_trim_small2.png",
-    "assets/reactor_top_trim_tiny.png",
-    "assets/reactor_top_trim_xsmall.png"
-  ]
+    "name":  "Fusion-Tom-manage",
+    "version":  "1.2.0",
+    "channel":  "stable",
+    "entrypoint":  "start_menu_pages_live_v7.lua",
+    "source":  {
+                   "owner":  "viper1331",
+                   "repo":  "Fusion-Tom-manage",
+                   "branch":  "main",
+                   "manifestPath":  "fusion.manifest.json"
+               },
+    "files":  [
+                  {
+                      "path":  "start_menu_pages_live_v7.lua",
+                      "size":  94059
+                  },
+                  {
+                      "path":  "install.lua",
+                      "size":  9609
+                  },
+                  {
+                      "path":  "fusion_config.lua",
+                      "size":  1182
+                  },
+                  {
+                      "path":  "fusion.version",
+                      "size":  7
+                  },
+                  {
+                      "path":  "fusion.manifest.json"
+                  },
+                  {
+                      "path":  "core/update/version.lua",
+                      "size":  2245
+                  },
+                  {
+                      "path":  "core/update/manifest.lua",
+                      "size":  4965
+                  },
+                  {
+                      "path":  "core/update/client.lua",
+                      "size":  3718
+                  },
+                  {
+                      "path":  "core/update/apply.lua",
+                      "size":  5677
+                  },
+                  {
+                      "path":  "gpu_debug.lua",
+                      "size":  821
+                  },
+                  {
+                      "path":  "tp_mek_scan.lua",
+                      "size":  4199
+                  },
+                  {
+                      "path":  "assets/laser_module_large.png",
+                      "size":  26176
+                  },
+                  {
+                      "path":  "assets/laser_module_medium.png",
+                      "size":  14972
+                  },
+                  {
+                      "path":  "assets/laser_module_micro.png",
+                      "size":  790
+                  },
+                  {
+                      "path":  "assets/laser_module_small.png",
+                      "size":  8609
+                  },
+                  {
+                      "path":  "assets/laser_module_small2.png",
+                      "size":  4487
+                  },
+                  {
+                      "path":  "assets/laser_module_tiny.png",
+                      "size":  1410
+                  },
+                  {
+                      "path":  "assets/laser_module_xsmall.png",
+                      "size":  2255
+                  },
+                  {
+                      "path":  "assets/module laser.png",
+                      "size":  56154
+                  },
+                  {
+                      "path":  "assets/reactor_top.png",
+                      "size":  371025
+                  },
+                  {
+                      "path":  "assets/reactor_top_trim_large.png",
+                      "size":  289886
+                  },
+                  {
+                      "path":  "assets/reactor_top_trim_medium.png",
+                      "size":  151303
+                  },
+                  {
+                      "path":  "assets/reactor_top_trim_micro.png",
+                      "size":  5929
+                  },
+                  {
+                      "path":  "assets/reactor_top_trim_small.png",
+                      "size":  54332
+                  },
+                  {
+                      "path":  "assets/reactor_top_trim_small2.png",
+                      "size":  35558
+                  },
+                  {
+                      "path":  "assets/reactor_top_trim_tiny.png",
+                      "size":  12090
+                  },
+                  {
+                      "path":  "assets/reactor_top_trim_xsmall.png",
+                      "size":  19070
+                  }
+              ]
 }

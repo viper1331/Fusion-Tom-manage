@@ -35,4 +35,14 @@ return {
     telemetryPollMs = 500,
     relayAnalogStrength = 15,
   },
+  update = {
+    channel = "stable",
+    owner = "viper1331",
+    repo = "Fusion-Tom-manage",
+    branch = "main",
+    manifestPath = "fusion.manifest.json",
+    rawBaseUrl = "",
+    requireConfirmApply = true,
+    autoCheckOnStartup = false,
+  },
 }

@@ -42,12 +42,22 @@ local defaults = {
   ui = {
     startPage = "OVERVIEW",
   },
+  update = {
+    channel = "stable",
+    owner = "viper1331",
+    repo = "Fusion-Tom-manage",
+    branch = "main",
+    manifestPath = "fusion.manifest.json",
+    rawBaseUrl = "",
+    requireConfirmApply = true,
+    autoCheckOnStartup = false,
+  },
 }
 
 local cfg = textutils.unserialize(textutils.serialize(defaults))
 
 local SIDE_OPTIONS = { "", "top", "bottom", "left", "right", "front", "back" }
-local PAGE_OPTIONS = { "OVERVIEW", "CONTROL", "FUEL", "SYSTEM" }
+local PAGE_OPTIONS = { "OVERVIEW", "CONTROL", "FUEL", "SYSTEM", "MAJ" }
 
 local function cls()
   term.setBackgroundColor(colors.black)
@@ -85,6 +95,24 @@ local function promptNumber(default, label, minv, maxv)
       return v
     end
     print("Valeur invalide.")
+  end
+end
+
+local function promptBool(default, label)
+  local def = default and "o" or "n"
+  while true do
+    write(label .. " [o/n, defaut=" .. def .. "] : ")
+    local v = string.lower(read() or "")
+    if v == "" then
+      return default == true
+    end
+    if v == "o" or v == "y" then
+      return true
+    end
+    if v == "n" then
+      return false
+    end
+    print("Reponse invalide, utiliser o ou n.")
   end
 end
 
@@ -218,6 +246,18 @@ local function stepControl()
   cfg.control.laserModuleCount = promptNumber(cfg.control.laserModuleCount, "Nombre de modules laser terrain", 1, 64)
 end
 
+local function stepUpdate()
+  title("Etape 8 - Mise a jour (MAJ)")
+  cfg.update.channel = prompt(cfg.update.channel, "Canal de mise a jour (stable)")
+  cfg.update.owner = prompt(cfg.update.owner, "GitHub owner")
+  cfg.update.repo = prompt(cfg.update.repo, "GitHub repository")
+  cfg.update.branch = prompt(cfg.update.branch, "Branche distante")
+  cfg.update.manifestPath = prompt(cfg.update.manifestPath, "Chemin manifest distant")
+  cfg.update.rawBaseUrl = prompt(cfg.update.rawBaseUrl, "Raw base URL optionnelle (laisser vide pour GitHub raw)")
+  cfg.update.requireConfirmApply = promptBool(cfg.update.requireConfirmApply, "Confirmer avant APPLY")
+  cfg.update.autoCheckOnStartup = promptBool(cfg.update.autoCheckOnStartup, "Auto CHECK au demarrage")
+end
+
 local function writeConfig(path, data)
   local fh = assert(fs.open(path, "w"))
   fh.write("return ")
@@ -234,6 +274,9 @@ local function summary()
   print("Laser modules: " .. tostring(cfg.control.laserModuleCount))
   print("Polling: " .. tostring(cfg.control.telemetryPollMs) .. " ms")
   print("Page start: " .. tostring(cfg.ui.startPage))
+  print("Update channel: " .. tostring(cfg.update.channel))
+  print("Update branch: " .. tostring(cfg.update.branch))
+  print("Auto-check: " .. tostring(cfg.update.autoCheckOnStartup))
   print("")
   print("Sauvegarder ? (o/n)")
   local a = read()
@@ -255,4 +298,5 @@ stepReaders()
 stepRelays()
 stepRelaySides()
 stepControl()
+stepUpdate()
 summary()

@@ -46,6 +46,16 @@ local DEFAULTS = {
     gpuMode = 64,
     refreshSeconds = 0.12,
   },
+  update = {
+    channel = "stable",
+    owner = "viper1331",
+    repo = "Fusion-Tom-manage",
+    branch = "main",
+    manifestPath = "fusion.manifest.json",
+    rawBaseUrl = "",
+    requireConfirmApply = true,
+    autoCheckOnStartup = false,
+  },
 }
 
 local function deepCopy(value)
@@ -107,7 +117,18 @@ local ASSET_LASER_MODULE_VARIANTS = {
 -- === Runtime config ===
 local DEVICES = deepCopy(DEFAULTS.devices)
 local CONTROL = deepCopy(DEFAULTS.control)
+local UPDATE_CFG = deepCopy(DEFAULTS.update)
 local START_PAGE = DEFAULTS.ui.startPage
+local UPDATE_VERSION_FILE = "fusion.version"
+local UPDATE_MANIFEST_FILE = "fusion.manifest.json"
+local UPDATE_LOG_FILE = "update.log"
+local UPDATE_TEMP_DIR = "update_tmp"
+local UPDATE_BACKUP_DIR = "backup_last"
+
+local UpdateVersion = assert(dofile("core/update/version.lua"))
+local UpdateManifest = assert(dofile("core/update/manifest.lua"))
+local UpdateClient = assert(dofile("core/update/client.lua"))
+local UpdateApply = assert(dofile("core/update/apply.lua"))
 
 -- === External config loader ===
 local function loadExternalConfig()
@@ -141,6 +162,33 @@ local function loadExternalConfig()
       for k, v in pairs(cfg.control.relaySides) do
         CONTROL.relaySides[k] = v
       end
+    end
+  end
+
+  if type(cfg.update) == "table" then
+    if type(cfg.update.channel) == "string" and cfg.update.channel ~= "" then
+      UPDATE_CFG.channel = cfg.update.channel
+    end
+    if type(cfg.update.owner) == "string" and cfg.update.owner ~= "" then
+      UPDATE_CFG.owner = cfg.update.owner
+    end
+    if type(cfg.update.repo) == "string" and cfg.update.repo ~= "" then
+      UPDATE_CFG.repo = cfg.update.repo
+    end
+    if type(cfg.update.branch) == "string" and cfg.update.branch ~= "" then
+      UPDATE_CFG.branch = cfg.update.branch
+    end
+    if type(cfg.update.manifestPath) == "string" and cfg.update.manifestPath ~= "" then
+      UPDATE_CFG.manifestPath = cfg.update.manifestPath
+    end
+    if type(cfg.update.rawBaseUrl) == "string" then
+      UPDATE_CFG.rawBaseUrl = cfg.update.rawBaseUrl
+    end
+    if type(cfg.update.requireConfirmApply) == "boolean" then
+      UPDATE_CFG.requireConfirmApply = cfg.update.requireConfirmApply
+    end
+    if type(cfg.update.autoCheckOnStartup) == "boolean" then
+      UPDATE_CFG.autoCheckOnStartup = cfg.update.autoCheckOnStartup
     end
   end
 
@@ -228,6 +276,30 @@ local state = {
   message = "none",
   lastAction = "idle",
   animTick = 0,
+  restartRequested = false,
+  restartTarget = nil,
+
+  update = {
+    localVersion = "n/a",
+    remoteVersion = "n/a",
+    channel = UPDATE_CFG.channel,
+    remoteStatus = "idle",
+    filesToUpdate = 0,
+    downloadedFiles = 0,
+    lastCheck = "never",
+    lastApply = "never",
+    lastDownload = "never",
+    lastError = "none",
+    lastCheckSummary = "not checked",
+    logs = {},
+    remoteManifest = nil,
+    remoteSource = nil,
+    localManifest = nil,
+    pendingFiles = {},
+    downloaded = false,
+    applyConfirmArmed = false,
+    canRollback = false,
+  },
 
   live = {
     cache = nil,
@@ -257,7 +329,21 @@ local PAGES = {
   { id = "CONTROL",  label = "CONTROL"  },
   { id = "FUEL",     label = "FUEL"     },
   { id = "SYSTEM",   label = "SYSTEM"   },
+  { id = "MAJ",      label = "MAJ"      },
 }
+
+local function pageExists(pageId)
+  for _, page in ipairs(PAGES) do
+    if page.id == pageId then
+      return true
+    end
+  end
+  return false
+end
+
+if not pageExists(state.page) then
+  state.page = "OVERVIEW"
+end
 
 local function clamp(v, a, b)
   if v < a then return a end
@@ -1631,6 +1717,10 @@ local function processPendingTimer(timerId)
 end
 
 local function getDataSummary(data)
+  if state.page == "MAJ" then
+    return state.update.lastCheckSummary or "update idle"
+  end
+
   if not data.logicPresent then
     return "logic offline"
   end
@@ -1648,6 +1738,343 @@ local function getDataSummary(data)
   end
 
   return "offline"
+end
+
+-- === Update subsystem ===
+local function nowText()
+  local ok, value = pcall(os.date, "%Y-%m-%d %H:%M:%S")
+  if ok and type(value) == "string" and value ~= "" then
+    return value
+  end
+  return tostring(nowMs())
+end
+
+local function loadUpdateLogTail(maxLines)
+  maxLines = math.max(1, math.floor(maxLines or 10))
+  state.update.logs = {}
+
+  if not fs.exists(UPDATE_LOG_FILE) then
+    return
+  end
+
+  local fh = fs.open(UPDATE_LOG_FILE, "r")
+  if not fh then
+    return
+  end
+
+  local text = fh.readAll() or ""
+  fh.close()
+
+  local lines = {}
+  for line in string.gmatch(text, "[^\r\n]+") do
+    lines[#lines + 1] = line
+  end
+
+  local startAt = math.max(1, #lines - maxLines + 1)
+  for i = startAt, #lines do
+    state.update.logs[#state.update.logs + 1] = lines[i]
+  end
+end
+
+local function appendUpdateLogLine(message)
+  local entry = "[" .. nowText() .. "] " .. tostring(message or "event")
+  local fh = fs.open(UPDATE_LOG_FILE, "a")
+  if fh then
+    fh.writeLine(entry)
+    fh.close()
+  end
+  loadUpdateLogTail(12)
+end
+
+local function buildUpdateSource(remoteManifest)
+  local source = {
+    owner = tostring(UPDATE_CFG.owner or ""),
+    repo = tostring(UPDATE_CFG.repo or ""),
+    branch = tostring(UPDATE_CFG.branch or "main"),
+    rawBaseUrl = tostring(UPDATE_CFG.rawBaseUrl or ""),
+  }
+
+  if type(remoteManifest) == "table" and type(remoteManifest.source) == "table" then
+    if source.rawBaseUrl == "" and type(remoteManifest.source.rawBaseUrl) == "string" and remoteManifest.source.rawBaseUrl ~= "" then
+      source.rawBaseUrl = remoteManifest.source.rawBaseUrl
+    end
+    if source.owner == "" and type(remoteManifest.source.owner) == "string" then
+      source.owner = remoteManifest.source.owner
+    end
+    if source.repo == "" and type(remoteManifest.source.repo) == "string" then
+      source.repo = remoteManifest.source.repo
+    end
+    if source.branch == "" and type(remoteManifest.source.branch) == "string" then
+      source.branch = remoteManifest.source.branch
+    end
+  end
+
+  return source
+end
+
+local function resolveManifestPath(remoteManifest)
+  if type(UPDATE_CFG.manifestPath) == "string" and UPDATE_CFG.manifestPath ~= "" then
+    return UPDATE_CFG.manifestPath
+  end
+
+  if type(remoteManifest) == "table" and type(remoteManifest.source) == "table" and type(remoteManifest.source.manifestPath) == "string" and remoteManifest.source.manifestPath ~= "" then
+    return remoteManifest.source.manifestPath
+  end
+
+  return UPDATE_MANIFEST_FILE
+end
+
+local function validateUpdateSource(source)
+  if type(source.rawBaseUrl) == "string" and source.rawBaseUrl ~= "" then
+    return true
+  end
+
+  if source.owner == "" or source.repo == "" or source.branch == "" then
+    return false, "update source incomplete (owner/repo/branch)"
+  end
+
+  return true
+end
+
+local function refreshLocalUpdateSnapshot()
+  local localVersion, versionErr = UpdateVersion.readLocalVersion(UPDATE_VERSION_FILE)
+  if localVersion then
+    state.update.localVersion = localVersion
+  else
+    state.update.localVersion = "n/a"
+    state.update.lastError = firstLine(versionErr or "version read failed")
+  end
+
+  local localManifest, manifestErr = UpdateManifest.readLocal(UPDATE_MANIFEST_FILE)
+  if localManifest then
+    state.update.localManifest = localManifest
+    state.update.channel = tostring(localManifest.channel or UPDATE_CFG.channel)
+  else
+    state.update.localManifest = nil
+    state.update.lastError = firstLine(manifestErr or "manifest read failed")
+  end
+
+  local backupMeta = UpdateApply.loadBackupMeta(UPDATE_BACKUP_DIR)
+  state.update.canRollback = backupMeta ~= nil
+end
+
+local function performUpdateCheck(reason)
+  state.update.applyConfirmArmed = false
+  state.update.lastCheck = nowText()
+  refreshLocalUpdateSnapshot()
+
+  if not UpdateClient.isHttpEnabled() then
+    local msg = "HTTP disabled in ComputerCraft"
+    state.update.remoteStatus = "http disabled"
+    state.update.lastError = msg
+    state.update.lastCheckSummary = "check failed"
+    appendUpdateLogLine("CHECK failed: " .. msg)
+    return false, msg
+  end
+
+  local source = buildUpdateSource(nil)
+  local sourceOk, sourceErr = validateUpdateSource(source)
+  if not sourceOk then
+    state.update.remoteStatus = "source error"
+    state.update.lastError = sourceErr
+    state.update.lastCheckSummary = "check failed"
+    appendUpdateLogLine("CHECK failed: " .. tostring(sourceErr))
+    return false, sourceErr
+  end
+
+  local manifestPath = resolveManifestPath(nil)
+  local manifestUrl = UpdateClient.buildRawUrl(source, manifestPath)
+  local remoteManifest, remoteErr = UpdateManifest.readRemote(UpdateClient, manifestUrl)
+  if not remoteManifest then
+    state.update.remoteStatus = "offline"
+    state.update.lastError = remoteErr
+    state.update.lastCheckSummary = "check failed"
+    appendUpdateLogLine("CHECK failed: " .. tostring(remoteErr))
+    return false, remoteErr
+  end
+
+  local remoteSource = buildUpdateSource(remoteManifest)
+  local remoteSourceOk, remoteSourceErr = validateUpdateSource(remoteSource)
+  if not remoteSourceOk then
+    state.update.remoteStatus = "source error"
+    state.update.lastError = remoteSourceErr
+    state.update.lastCheckSummary = "check failed"
+    appendUpdateLogLine("CHECK failed: " .. tostring(remoteSourceErr))
+    return false, remoteSourceErr
+  end
+
+  state.update.remoteManifest = remoteManifest
+  state.update.remoteSource = remoteSource
+  state.update.remoteVersion = tostring(remoteManifest.version or "n/a")
+  state.update.channel = tostring(remoteManifest.channel or UPDATE_CFG.channel)
+  state.update.pendingFiles = UpdateManifest.computePendingFiles(state.update.localManifest, remoteManifest)
+  state.update.filesToUpdate = #state.update.pendingFiles
+  state.update.remoteStatus = "online"
+  state.update.lastError = "none"
+  state.update.downloaded = false
+  state.update.downloadedFiles = 0
+
+  local newer, cmpErr = UpdateVersion.isRemoteNewer(state.update.localVersion, state.update.remoteVersion)
+  if newer == nil then
+    if state.update.filesToUpdate > 0 then
+      state.update.lastCheckSummary = "update available"
+    else
+      state.update.lastCheckSummary = "checked (version compare unavailable)"
+    end
+    if cmpErr then
+      appendUpdateLogLine("CHECK warning: " .. tostring(cmpErr))
+    end
+  elseif newer or state.update.filesToUpdate > 0 then
+    state.update.lastCheckSummary = "update available"
+  else
+    state.update.lastCheckSummary = "up to date"
+  end
+
+  appendUpdateLogLine("CHECK " .. tostring(reason or "manual") .. ": local=" .. tostring(state.update.localVersion) .. ", remote=" .. tostring(state.update.remoteVersion) .. ", pending=" .. tostring(state.update.filesToUpdate))
+  return true, state.update.lastCheckSummary
+end
+
+local function performUpdateDownload()
+  state.update.applyConfirmArmed = false
+
+  if not state.update.remoteManifest then
+    local ok, err = performUpdateCheck("download precheck")
+    if not ok then
+      return false, err
+    end
+  end
+
+  local remoteManifest = state.update.remoteManifest
+  local remoteSource = state.update.remoteSource or buildUpdateSource(remoteManifest)
+  local sourceOk, sourceErr = validateUpdateSource(remoteSource)
+  if not sourceOk then
+    state.update.lastError = sourceErr
+    state.update.remoteStatus = "source error"
+    appendUpdateLogLine("DOWNLOAD failed: " .. tostring(sourceErr))
+    return false, sourceErr
+  end
+
+  local clearOk, clearErr = UpdateApply.clearPath(UPDATE_TEMP_DIR)
+  if not clearOk then
+    state.update.lastError = clearErr
+    appendUpdateLogLine("DOWNLOAD failed: " .. tostring(clearErr))
+    return false, clearErr
+  end
+
+  fs.makeDir(UPDATE_TEMP_DIR)
+
+  local downloaded, downloadErr = UpdateClient.downloadFiles(remoteSource, remoteManifest.files, UPDATE_TEMP_DIR, appendUpdateLogLine)
+  if not downloaded then
+    state.update.lastError = downloadErr
+    state.update.remoteStatus = "download error"
+    appendUpdateLogLine("DOWNLOAD failed: " .. tostring(downloadErr))
+    return false, downloadErr
+  end
+
+  state.update.downloaded = true
+  state.update.downloadedFiles = #downloaded
+  state.update.lastDownload = nowText()
+  state.update.lastError = "none"
+  state.update.remoteStatus = "downloaded"
+  appendUpdateLogLine("DOWNLOAD success: files=" .. tostring(#downloaded))
+
+  return true, "downloaded " .. tostring(#downloaded) .. " files"
+end
+
+local function performUpdateApply()
+  if UPDATE_CFG.requireConfirmApply and not state.update.applyConfirmArmed then
+    state.update.applyConfirmArmed = true
+    appendUpdateLogLine("APPLY waiting confirmation")
+    return false, "confirmation required: press APPLY again"
+  end
+
+  state.update.applyConfirmArmed = false
+
+  local remoteManifest = state.update.remoteManifest
+  if not remoteManifest then
+    return false, "check required before apply"
+  end
+
+  if not state.update.downloaded then
+    return false, "download required before apply"
+  end
+
+  local context = {
+    previousVersion = state.update.localVersion,
+    previousManifestVersion = state.update.localManifest and state.update.localManifest.version or "n/a",
+  }
+
+  local backupOk, backupErr = UpdateApply.createBackup(remoteManifest.files, UPDATE_BACKUP_DIR, context, appendUpdateLogLine)
+  if not backupOk then
+    state.update.lastError = backupErr
+    appendUpdateLogLine("APPLY failed (backup): " .. tostring(backupErr))
+    return false, backupErr
+  end
+
+  local applied, applyErr = UpdateApply.applyFromStaging(remoteManifest.files, UPDATE_TEMP_DIR, appendUpdateLogLine)
+  if not applied then
+    local rolledBack, rollbackErr = UpdateApply.rollback(UPDATE_BACKUP_DIR, appendUpdateLogLine)
+    if rolledBack then
+      state.update.lastError = "apply failed, rollback done: " .. tostring(applyErr)
+      appendUpdateLogLine("APPLY failed, rollback done: " .. tostring(applyErr))
+      refreshLocalUpdateSnapshot()
+      return false, state.update.lastError
+    end
+
+    state.update.lastError = "apply failed and rollback failed: " .. tostring(applyErr) .. " / " .. tostring(rollbackErr)
+    appendUpdateLogLine("APPLY critical failure: " .. state.update.lastError)
+    return false, state.update.lastError
+  end
+
+  UpdateApply.clearPath(UPDATE_TEMP_DIR)
+  state.update.lastApply = nowText()
+  state.update.remoteStatus = "applied"
+  state.update.downloaded = false
+  state.update.downloadedFiles = 0
+  state.update.pendingFiles = {}
+  state.update.filesToUpdate = 0
+  state.update.lastError = "none"
+  refreshLocalUpdateSnapshot()
+  appendUpdateLogLine("APPLY success: local version=" .. tostring(state.update.localVersion))
+
+  return true, "apply done"
+end
+
+local function performUpdateRollback()
+  state.update.applyConfirmArmed = false
+
+  local rolledBack, rollbackErr = UpdateApply.rollback(UPDATE_BACKUP_DIR, appendUpdateLogLine)
+  if not rolledBack then
+    state.update.lastError = rollbackErr
+    appendUpdateLogLine("ROLLBACK failed: " .. tostring(rollbackErr))
+    return false, rollbackErr
+  end
+
+  UpdateApply.clearPath(UPDATE_TEMP_DIR)
+  state.update.lastApply = nowText() .. " (rollback)"
+  state.update.remoteStatus = "rolled back"
+  state.update.downloaded = false
+  state.update.downloadedFiles = 0
+  state.update.lastError = "none"
+  refreshLocalUpdateSnapshot()
+  appendUpdateLogLine("ROLLBACK success: local version=" .. tostring(state.update.localVersion))
+
+  return true, "rollback done"
+end
+
+local function requestProgramRestart()
+  local entrypoint = "start_menu_pages_live_v7.lua"
+  if state.update.localManifest and type(state.update.localManifest.entrypoint) == "string" and state.update.localManifest.entrypoint ~= "" then
+    entrypoint = state.update.localManifest.entrypoint
+  elseif state.update.remoteManifest and type(state.update.remoteManifest.entrypoint) == "string" and state.update.remoteManifest.entrypoint ~= "" then
+    entrypoint = state.update.remoteManifest.entrypoint
+  end
+
+  state.restartTarget = entrypoint
+  state.restartRequested = true
+  appendUpdateLogLine("RESTART requested: " .. tostring(entrypoint))
+  os.queueEvent("fusion_restart")
+  return true, "restart queued: " .. tostring(entrypoint)
 end
 
 -- === Rendering ===
@@ -1706,10 +2133,17 @@ local function drawMicroHeader(r, data)
   local leftText = "FR-U1"
   local rightText = data.status == "STABLE" and "ON" or data.status
   local centerText = "Lx" .. tostring(CONTROL.laserModuleCount)
+  local navW = math.max(24, math.floor(r.w * 0.24))
+  local navH = math.max(12, r.h - 2)
+  local navX = r.x + r.w - navW - 1
+  local navY = r.y + 1
+  local navId = state.page == "MAJ" and "PAGE_OVERVIEW" or "PAGE_MAJ"
+  local navLabel = state.page == "MAJ" and "HOME" or "MAJ"
 
   drawText(r.x + ui.pad, r.y + 2, leftText, C.text, 1)
   drawTextCenter(r.x, r.y + 2, r.w, centerText, C.yellow, 1)
-  drawTextRight(r.x + r.w - ui.pad, r.y + 2, rightText, chooseStateColor(data), 1)
+  drawTextRight(navX - ui.smallPad, r.y + 2, rightText, chooseStateColor(data), 1)
+  drawButton(navId, navX, navY, navW, navH, navLabel, "purple", true)
 end
 
 local function drawMicroOverview(r, data)
@@ -1753,6 +2187,125 @@ local function drawMicroOverview(r, data)
   y = y + 12
   drawText(statsRect.x + ui.pad, y, "LG", C.text, 1)
   drawTextRight(statsRect.x + statsRect.w - ui.pad, y, data.logicMode or "UNK", C.cyan, 1)
+end
+
+local function drawMicroMajPage(r, data)
+  drawPanel(r.x, r.y, r.w, r.h, "MAJ")
+
+  local infoH = math.max(52, math.floor(r.h * 0.40))
+  local infoRect = { x = r.x + ui.smallPad, y = r.y + sv(18), w = r.w - ui.smallPad * 2, h = infoH }
+  local actionsRect = {
+    x = r.x + ui.smallPad,
+    y = infoRect.y + infoRect.h + ui.smallPad,
+    w = r.w - ui.smallPad * 2,
+    h = r.h - infoH - sv(18) - ui.smallPad * 2,
+  }
+
+  local rowY = infoRect.y + 2
+  drawText(infoRect.x + 1, rowY, "LV", C.text, 1)
+  drawTextRight(infoRect.x + infoRect.w - 1, rowY, state.update.localVersion, C.cyan, 1)
+
+  rowY = rowY + 11
+  drawText(infoRect.x + 1, rowY, "RV", C.text, 1)
+  drawTextRight(infoRect.x + infoRect.w - 1, rowY, state.update.remoteVersion, C.yellow, 1)
+
+  rowY = rowY + 11
+  drawText(infoRect.x + 1, rowY, "FILES", C.text, 1)
+  drawTextRight(infoRect.x + infoRect.w - 1, rowY, tostring(state.update.filesToUpdate), state.update.filesToUpdate > 0 and C.orange or C.green, 1)
+
+  rowY = rowY + 11
+  drawText(infoRect.x + 1, rowY, "STAT", C.text, 1)
+  drawTextRight(infoRect.x + infoRect.w - 1, rowY, state.update.remoteStatus, C.muted, 1)
+
+  local pad = 1
+  local gap = math.max(1, math.floor(ui.smallPad * 0.6))
+  local bw = math.floor((actionsRect.w - gap) / 2)
+  local bh = math.max(11, math.floor((actionsRect.h - gap * 2) / 3))
+  local x1 = actionsRect.x + pad
+  local x2 = x1 + bw + gap
+  local y1 = actionsRect.y + pad
+  local y2 = y1 + bh + gap
+  local y3 = y2 + bh + gap
+
+  drawButton("UPDATE_CHECK", x1, y1, bw, bh, "CHECK", "cyan", true)
+  drawButton("UPDATE_DOWNLOAD", x2, y1, bw, bh, "DL", "purple", true)
+  drawButton("UPDATE_APPLY", x1, y2, bw, bh, "APPLY", "green", true)
+  drawButton("UPDATE_ROLLBACK", x2, y2, bw, bh, "ROLL", "orange", state.update.canRollback)
+  drawButton("UPDATE_RESTART", x1, y3, bw * 2 + gap, bh, "RESTART", "red", true)
+end
+
+local function drawUpdatePage(r)
+  local topRatio = ui.compact and 0.68 or 0.72
+  local top, actions = splitVertical(r, topRatio)
+  local statusRect, logRect
+
+  if ui.compact then
+    statusRect, logRect = splitVertical(top, 0.54)
+  else
+    statusRect, logRect = splitHorizontal(top, 0.52)
+  end
+
+  drawPanel(statusRect.x, statusRect.y, statusRect.w, statusRect.h, "MAJ STATUS")
+  local baseY = statusRect.y + sv(54)
+  local step = math.max(12, sv(16))
+  local statusRows = {
+    { label = "LOCAL VERSION", value = state.update.localVersion, color = C.cyan },
+    { label = "REMOTE VERSION", value = state.update.remoteVersion, color = C.yellow },
+    { label = "CHANNEL", value = state.update.channel, color = C.text },
+    { label = "REMOTE STATUS", value = state.update.remoteStatus, color = state.update.remoteStatus == "online" and C.green or C.orange },
+    { label = "FILES TO UPDATE", value = tostring(state.update.filesToUpdate), color = state.update.filesToUpdate > 0 and C.orange or C.green },
+    { label = "LAST CHECK", value = state.update.lastCheck, color = C.text },
+    { label = "LAST APPLY", value = state.update.lastApply, color = C.text },
+    { label = "LAST DOWNLOAD", value = state.update.lastDownload, color = C.text },
+    { label = "CHECK SUMMARY", value = state.update.lastCheckSummary, color = C.muted },
+  }
+
+  local maxRows = math.max(4, math.floor((statusRect.h - sv(58)) / step))
+  local rowCount = math.min(maxRows, #statusRows)
+  for i = 1, rowCount do
+    local row = statusRows[i]
+    drawToggleRow(statusRect, baseY + step * (i - 1), row.label, row.value, row.color)
+  end
+
+  drawPanel(logRect.x, logRect.y, logRect.w, logRect.h, "MAJ LOG")
+  local logY = logRect.y + sv(54)
+  local maxLogLines = math.max(3, math.floor((logRect.h - sv(62)) / step))
+  local totalLines = #state.update.logs
+  local startIndex = math.max(1, totalLines - maxLogLines + 1)
+  local lineIndex = 0
+
+  if totalLines == 0 then
+    drawText(logRect.x + ui.pad, logY, "no update log yet", C.muted, 1)
+  else
+    for i = startIndex, totalLines do
+      local line = state.update.logs[i]
+      local low = string.lower(line)
+      local color = (string.find(low, "failed", 1, true) or string.find(low, "error", 1, true)) and C.red or C.text
+      drawText(logRect.x + ui.pad, logY + step * lineIndex, firstLine(line), color, 1)
+      lineIndex = lineIndex + 1
+    end
+  end
+
+  drawPanel(actions.x, actions.y, actions.w, actions.h, "MAJ ACTIONS")
+  local pad = ui.pad
+  local gap = ui.gap
+  local usableW = actions.w - pad * 2
+  local bh = math.max(ui.buttonH, sv(34))
+  local y1 = actions.y + sv(54)
+  local y2 = y1 + bh + sv(10)
+
+  local bw3 = math.floor((usableW - gap * 2) / 3)
+  local x1 = actions.x + pad
+  local x2 = x1 + bw3 + gap
+  local x3 = x2 + bw3 + gap
+
+  drawButton("UPDATE_CHECK", x1, y1, bw3, bh, "[CHECK]", "cyan", true)
+  drawButton("UPDATE_DOWNLOAD", x2, y1, bw3, bh, "[DOWNLOAD]", "purple", true)
+  drawButton("UPDATE_APPLY", x3, y1, bw3, bh, UPDATE_CFG.requireConfirmApply and (state.update.applyConfirmArmed and "[APPLY CONFIRM]" or "[APPLY]") or "[APPLY]", "green", true)
+
+  local bw2 = math.floor((usableW - gap) / 2)
+  drawButton("UPDATE_ROLLBACK", x1, y2, bw2, bh, "[ROLLBACK]", "orange", state.update.canRollback)
+  drawButton("UPDATE_RESTART", x1 + bw2 + gap, y2, bw2, bh, "[RESTART]", "red", true)
 end
 
 local function drawImageStack(slotX, slotY, slotW, slotH, data, forcedLayout)
@@ -2084,7 +2637,15 @@ local function readFusionData(force)
 end
 
 local function setPage(pageId)
+  if not pageExists(pageId) then
+    state.message = "unknown page: " .. tostring(pageId)
+    return
+  end
+
   state.page = pageId
+  if pageId ~= "MAJ" then
+    state.update.applyConfirmArmed = false
+  end
   state.lastAction = "page:" .. pageId:lower()
   state.message = "page " .. pageId:lower()
 end
@@ -2158,6 +2719,26 @@ local function handleAction(action)
     tryLoadAssets()
     state.message = "assets reloaded"
 
+  elseif action == "UPDATE_CHECK" then
+    local ok, msg = performUpdateCheck("manual")
+    state.message = ok and ("maj check: " .. firstLine(msg)) or ("maj check failed: " .. firstLine(msg))
+
+  elseif action == "UPDATE_DOWNLOAD" then
+    local ok, msg = performUpdateDownload()
+    state.message = ok and ("maj download: " .. firstLine(msg)) or ("maj download failed: " .. firstLine(msg))
+
+  elseif action == "UPDATE_APPLY" then
+    local ok, msg = performUpdateApply()
+    state.message = ok and ("maj apply: " .. firstLine(msg)) or ("maj apply pending/failed: " .. firstLine(msg))
+
+  elseif action == "UPDATE_ROLLBACK" then
+    local ok, msg = performUpdateRollback()
+    state.message = ok and ("maj rollback: " .. firstLine(msg)) or ("maj rollback failed: " .. firstLine(msg))
+
+  elseif action == "UPDATE_RESTART" then
+    local ok, msg = requestProgramRestart()
+    state.message = ok and firstLine(msg) or ("restart failed: " .. firstLine(msg))
+
   else
     state.message = action
   end
@@ -2187,7 +2768,11 @@ local function render()
 
   if ui.micro then
     drawMicroHeader(L.header, data)
-    drawMicroOverview(L.body, data)
+    if state.page == "MAJ" then
+      drawMicroMajPage(L.body, data)
+    else
+      drawMicroOverview(L.body, data)
+    end
     gpu.sync()
     return
   end
@@ -2201,8 +2786,10 @@ local function render()
     drawControlPage(L.body, data)
   elseif state.page == "FUEL" then
     drawFuelPage(L.body, data)
-  else
+  elseif state.page == "SYSTEM" then
     drawSystemPage(L.body, data)
+  else
+    drawUpdatePage(L.body)
   end
 
   drawFooter(L.footer, data)
@@ -2212,6 +2799,12 @@ end
 local function init()
   buildUI()
   tryLoadAssets()
+  refreshLocalUpdateSnapshot()
+  loadUpdateLogTail(12)
+  if UPDATE_CFG.autoCheckOnStartup then
+    local ok, msg = performUpdateCheck("startup")
+    state.message = ok and ("maj startup: " .. firstLine(msg)) or ("maj startup failed: " .. firstLine(msg))
+  end
   pollLiveData(true)
   render()
 end
@@ -2250,7 +2843,19 @@ while true do
     pollLiveData(true)
     render()
 
+  elseif event == "fusion_restart" then
+    break
+
   elseif event == "key_up" and p1 == keys.t then
     break
+  end
+end
+
+if state.restartRequested then
+  local target = state.restartTarget or "start_menu_pages_live_v7.lua"
+  if shell and type(shell.run) == "function" then
+    shell.run(target)
+  else
+    os.reboot()
   end
 end
