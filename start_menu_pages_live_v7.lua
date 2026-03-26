@@ -159,6 +159,7 @@ local FuelPageView = assert(dofile("ui/pages/fuel_page.lua"))
 local OverviewPageView = assert(dofile("ui/pages/overview_page.lua"))
 local OverviewGraphicsView = assert(dofile("ui/pages/overview_graphics.lua"))
 local TelemetryRuntime = assert(dofile("core/runtime/telemetry_runtime.lua"))
+local ActionRuntime = assert(dofile("core/runtime/action_runtime.lua"))
 
 -- === External config loader ===
 local function loadExternalConfig()
@@ -860,6 +861,14 @@ local function firstLine(s)
   return s
 end
 
+local function nowMs()
+  if os.epoch then
+    return os.epoch("utc")
+  end
+
+  return math.floor((os.clock() or 0) * 1000)
+end
+
 local telemetryRuntime = TelemetryRuntime.create({
   devices = DEVICES,
   control = CONTROL,
@@ -877,92 +886,38 @@ local function pollLiveData(force)
   return telemetryRuntime.pollLiveData(force)
 end
 
-local function relaySideConfigured(key)
-  local side = CONTROL.relaySides[key]
-  if type(side) == "string" and side ~= "" then
-    return side
-  end
-  return nil
+local function invalidateWrapped(name)
+  telemetryRuntime.invalidateWrapped(name)
 end
 
 -- === Actions (device controls) ===
+local actionRuntime = ActionRuntime.create({
+  devices = DEVICES,
+  control = CONTROL,
+  state = state,
+  safeCall = safeCall,
+  firstLine = firstLine,
+  clamp = clamp,
+})
+
+local function relaySideConfigured(key)
+  return actionRuntime.relaySideConfigured(key)
+end
+
 local function setRelayState(key, enabled)
-  local relayName = DEVICES.relays[key]
-  local side = relaySideConfigured(key)
-
-  if not relayName then
-    return false, "relay " .. tostring(key) .. " missing"
-  end
-
-  if not side then
-    return false, "relay side missing for " .. tostring(key)
-  end
-
-  local ok = safeCall(relayName, "setOutput", side, enabled)
-  if not ok then
-    return false, "setOutput failed: " .. tostring(key)
-  end
-
-  safeCall(relayName, "setAnalogOutput", side, enabled and CONTROL.relayAnalogStrength or 0)
-  state.live.relayStates[key] = enabled
-  return true, (enabled and "enabled " or "disabled ") .. tostring(key)
+  return actionRuntime.setRelayState(key, enabled)
 end
 
 local function pulseRelay(key, duration)
-  local relayName = DEVICES.relays[key]
-  local side = relaySideConfigured(key)
-
-  if not relayName then
-    return false, "relay " .. tostring(key) .. " missing"
-  end
-
-  if not side then
-    return false, "relay side missing for " .. tostring(key)
-  end
-
-  local ok, msg = setRelayState(key, true)
-  if not ok then
-    return false, msg
-  end
-
-  local timerId = os.startTimer(duration or CONTROL.laserPulseSeconds)
-  state.live.pendingTimers[timerId] = {
-    relayKey = key,
-    side = side,
-  }
-  return true, "pulse " .. tostring(key)
+  return actionRuntime.pulseRelay(key, duration)
 end
 
 local function openFuelFeed(enable)
-  local messages = {}
-  local okAny = false
-
-  local ok1, msg1 = setRelayState("deuteriumTank", enable)
-  messages[#messages + 1] = firstLine(msg1)
-  okAny = okAny or ok1
-
-  local ok2, msg2 = setRelayState("tritiumTank", enable)
-  messages[#messages + 1] = firstLine(msg2)
-  okAny = okAny or ok2
-
-  if enable and okAny then
-    state.manualFuel = true
-  elseif (not enable) and okAny then
-    state.manualFuel = false
-  end
-
-  return okAny, table.concat(messages, " | ")
+  return actionRuntime.openFuelFeed(enable)
 end
 
 local function processPendingTimer(timerId)
-  local pending = state.live.pendingTimers[timerId]
-  if not pending then
-    return false
-  end
-
-  state.live.pendingTimers[timerId] = nil
-  setRelayState(pending.relayKey, false)
-  return true
+  return actionRuntime.processPendingTimer(timerId)
 end
 
 local function getDataSummary(data)
@@ -1980,62 +1935,8 @@ local function handleAction(action)
 
   state.lastAction = action
 
-  if action == "AUTO" then
-    -- UI-only toggle: kept for operator workflows, not bound to reactor logic.
-    state.auto = not state.auto
-    state.message = state.auto and "ui-state only: auto flag enabled" or "ui-state only: auto flag disabled"
-
-  elseif action == "START" then
-    local okFuel, msgFuel = openFuelFeed(true)
-    local okPulse, msgPulse = pulseRelay("laserCharge", CONTROL.laserPulseSeconds)
-
-    if okFuel or okPulse then
-      state.message = "start: " .. firstLine(msgFuel or "") .. " | " .. firstLine(msgPulse or "")
-    else
-      state.message = "start blocked: relay sides not configured"
-    end
-
-  elseif action == "STOP" then
-    local okFuel, msgFuel = openFuelFeed(false)
-    if okFuel then
-      state.message = "stop: " .. firstLine(msgFuel)
-    else
-      state.message = "stop blocked: relay sides not configured"
-    end
-
-  elseif action == "SCRAM" then
-    local okFuel, msgFuel = openFuelFeed(false)
-    local okLaser, msgLaser = setRelayState("laserCharge", false)
-    if okFuel or okLaser then
-      state.message = "scram: " .. firstLine(msgFuel or "") .. " | " .. firstLine(msgLaser or "")
-    else
-      state.message = "scram blocked: relay sides not configured"
-    end
-
-  elseif action == "FIRE_LASER" then
-    local ok, msg = pulseRelay("laserCharge", CONTROL.laserPulseSeconds)
-    state.message = ok and firstLine(msg) or ("laser blocked: " .. firstLine(msg))
-
-  elseif action == "FILL_HOHLRAUM" then
-    state.message = "manual hohlraum required"
-
-  elseif action == "MANUAL_FUEL" then
-    local target = not state.manualFuel
-    local ok, msg = openFuelFeed(target)
-    state.message = ok and firstLine(msg) or ("fuel blocked: " .. firstLine(msg))
-
-  elseif action == "MAINTENANCE" then
-    state.maintenance = not state.maintenance
-    state.message = state.maintenance and "maintenance enabled" or "maintenance disabled"
-
-  elseif action == "PROFILE_PREV" then
-    -- UI-only selector: reserved for future ignition profile bindings.
-    state.ignitionProfile = clamp(state.ignitionProfile - 1, 1, 5)
-    state.message = "ui-state only: profile p" .. tostring(state.ignitionProfile)
-
-  elseif action == "PROFILE_NEXT" then
-    state.ignitionProfile = clamp(state.ignitionProfile + 1, 1, 5)
-    state.message = "ui-state only: profile p" .. tostring(state.ignitionProfile)
+  if actionRuntime.executeCommand(action) then
+    -- Runtime action handled in dedicated module.
 
   elseif action == "RELOAD_ASSETS" then
     tryLoadAssets()
@@ -2161,7 +2062,7 @@ while true do
     onTouch(p2, p3)
 
   elseif event == "peripheral" or event == "peripheral_detach" then
-    wrappedCache[p1] = nil
+    invalidateWrapped(p1)
     pollLiveData(true)
     render()
 

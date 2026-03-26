@@ -110,6 +110,14 @@ function M.create(args)
     return nil
   end
 
+  local function invalidateWrapped(name)
+    if type(name) ~= "string" or name == "" then
+      return
+    end
+
+    wrappedCache[name] = nil
+  end
+
   local function safeCall(name, method, ...)
     if type(name) ~= "string" or name == "" then
       return false, "invalid device"
@@ -522,6 +530,7 @@ function M.create(args)
   return {
     safeCall = safeCall,
     pollLiveData = pollLiveData,
+    invalidateWrapped = invalidateWrapped,
   }
 end
 
