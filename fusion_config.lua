@@ -1,0 +1,38 @@
+return {
+  ui = {
+    startPage = "OVERVIEW",
+  },
+  devices = {
+    gpu = "tm_gpu_3",
+    fusionController = "mekanismgenerators:fusion_reactor_controller_3",
+    modem = " ",
+    readers = {
+      tritium = "block_reader_2",
+      deuterium = "block_reader_1",
+      dtFuel = "block_reader_9",
+      active = "block_reader_7",
+    },
+    laser = "laser_0",
+    laserAmplifier = "laserAmplifier_1",
+    induction = "inductionPort_1",
+    logic = "fusionReactorLogicAdapter_0",
+    relays = {
+      laserCharge = "redstone_relay_0",
+      deuteriumTank = "redstone_relay_1",
+      tritiumTank = "redstone_relay_2",
+      aux = "redstone_relay_3",
+    },
+  },
+  control = {
+    laserModuleCount = 7,
+    relaySides = {
+      laserCharge = "top",
+      deuteriumTank = "front",
+      tritiumTank = "front",
+      aux = "top",
+    },
+    laserPulseSeconds = 0.15,
+    telemetryPollMs = 500,
+    relayAnalogStrength = 15,
+  },
+}
