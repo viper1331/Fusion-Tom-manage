@@ -132,6 +132,7 @@ local UPDATE_STATUS = {
   UPDATE_AVAILABLE = "UPDATE AVAILABLE",
   UP_TO_DATE = "UP TO DATE",
   DOWNLOADING = "DOWNLOADING",
+  VALIDATING = "VALIDATING",
   DOWNLOAD_FAILED = "DOWNLOAD FAILED",
   READY_TO_APPLY = "READY TO APPLY",
   APPLYING = "APPLYING",
@@ -341,6 +342,17 @@ local state = {
     downloaded = false,
     applyConfirmArmed = false,
     canRollback = false,
+    downloadProgress = {
+      phase = UPDATE_STATUS.IDLE,
+      totalFiles = 0,
+      completedFiles = 0,
+      totalBytesExpected = 0,
+      totalBytesCompleted = 0,
+      currentFile = "-",
+      currentFileSize = 0,
+      percent = 0,
+      note = "idle",
+    },
   },
 
   live = {
@@ -1003,6 +1015,9 @@ local function updateStatusColor(status)
   if status == UPDATE_STATUS.CHECKING or status == UPDATE_STATUS.DOWNLOADING or status == UPDATE_STATUS.APPLYING then
     return C.cyan
   end
+  if status == UPDATE_STATUS.VALIDATING then
+    return C.yellow
+  end
   if status == UPDATE_STATUS.ROLLBACK_DONE then
     return C.yellow
   end
@@ -1027,6 +1042,81 @@ local function setDownloadedState(flag, count)
   if not state.update.downloaded then
     state.update.applyConfirmArmed = false
   end
+end
+
+local function setDownloadProgress(progress)
+  if type(state.update.downloadProgress) ~= "table" then
+    state.update.downloadProgress = {}
+  end
+
+  local current = state.update.downloadProgress
+  if type(progress) == "table" then
+    if type(progress.phase) == "string" and progress.phase ~= "" then
+      current.phase = progress.phase
+    end
+    if type(progress.totalFiles) == "number" then
+      current.totalFiles = math.max(0, math.floor(progress.totalFiles))
+    end
+    if type(progress.completedFiles) == "number" then
+      current.completedFiles = math.max(0, math.floor(progress.completedFiles))
+    end
+    if type(progress.totalBytesExpected) == "number" then
+      current.totalBytesExpected = math.max(0, math.floor(progress.totalBytesExpected))
+    end
+    if type(progress.totalBytesCompleted) == "number" then
+      current.totalBytesCompleted = math.max(0, math.floor(progress.totalBytesCompleted))
+    end
+    if type(progress.currentFile) == "string" and progress.currentFile ~= "" then
+      current.currentFile = progress.currentFile
+    end
+    if type(progress.currentFileSize) == "number" then
+      current.currentFileSize = math.max(0, math.floor(progress.currentFileSize))
+    end
+    if type(progress.note) == "string" and progress.note ~= "" then
+      current.note = firstLine(progress.note)
+    end
+  end
+
+  current.phase = current.phase or UPDATE_STATUS.IDLE
+  current.totalFiles = math.max(0, math.floor(current.totalFiles or 0))
+  current.completedFiles = math.max(0, math.floor(current.completedFiles or 0))
+  current.totalBytesExpected = math.max(0, math.floor(current.totalBytesExpected or 0))
+  current.totalBytesCompleted = math.max(0, math.floor(current.totalBytesCompleted or 0))
+  current.currentFile = current.currentFile or "-"
+  current.currentFileSize = math.max(0, math.floor(current.currentFileSize or 0))
+  current.note = current.note or "idle"
+
+  local percent = 0
+  if current.totalBytesExpected > 0 then
+    percent = (current.totalBytesCompleted * 100) / current.totalBytesExpected
+  elseif current.totalFiles > 0 then
+    percent = (current.completedFiles * 100) / current.totalFiles
+  end
+
+  current.percent = round(clamp(percent, 0, 100), 1)
+end
+
+local function resetDownloadProgress(phase, note)
+  setDownloadProgress({
+    phase = phase or UPDATE_STATUS.IDLE,
+    totalFiles = 0,
+    completedFiles = 0,
+    totalBytesExpected = 0,
+    totalBytesCompleted = 0,
+    currentFile = "-",
+    currentFileSize = 0,
+    note = note or "idle",
+  })
+end
+
+local function sumManifestEntrySizes(fileEntries)
+  local total = 0
+  for _, entry in ipairs(fileEntries or {}) do
+    if type(entry) == "table" and type(entry.size) == "number" and entry.size >= 0 then
+      total = total + math.max(0, math.floor(entry.size))
+    end
+  end
+  return total
 end
 
 local function integrityStatusColor(status)
@@ -1183,6 +1273,12 @@ local function failUpdateStep(step, status, err)
   state.update.lastError = userMessage
   state.update.lastCheckSummary = string.lower(step) .. " failed"
   setIntegrityFromError(err)
+  if step == "DOWNLOAD" then
+    setDownloadProgress({
+      phase = UPDATE_STATUS.DOWNLOAD_FAILED,
+      note = userMessage,
+    })
+  end
   setUpdateStatus(status, userMessage, false)
   appendUpdateLogLine(step .. " failed (raw): " .. tostring(firstLine(err)))
   appendUpdateLogLine(step .. " failed (ui): " .. tostring(userMessage))
@@ -1318,6 +1414,7 @@ local function performUpdateCheck(reason)
   state.update.applyConfirmArmed = false
   state.update.lastCheck = nowText()
   setDownloadedState(false, 0)
+  resetDownloadProgress(UPDATE_STATUS.IDLE, "check reset")
   setIntegrityStatus(INTEGRITY_STATUS.PENDING, "manifest validation pending", false)
   state.update.remoteCommit = "n/a"
   state.update.remoteBranch = tostring(UPDATE_CFG.branch or "main")
@@ -1375,6 +1472,16 @@ local function performUpdateCheck(reason)
   appendUpdateLogLine("CHECK integrity mode: " .. tostring(remoteManifest.integrity and remoteManifest.integrity.mode or "size"))
   state.update.pendingFiles = UpdateManifest.computePendingFiles(state.update.localManifest, remoteManifest)
   state.update.filesToUpdate = #state.update.pendingFiles
+  setDownloadProgress({
+    phase = state.update.filesToUpdate > 0 and UPDATE_STATUS.UPDATE_AVAILABLE or UPDATE_STATUS.UP_TO_DATE,
+    totalFiles = state.update.filesToUpdate,
+    completedFiles = 0,
+    totalBytesExpected = sumManifestEntrySizes(state.update.pendingFiles),
+    totalBytesCompleted = 0,
+    currentFile = "-",
+    currentFileSize = 0,
+    note = state.update.filesToUpdate > 0 and "update files pending download" or "no pending files",
+  })
   state.update.lastError = manifestReady and "none" or formatUpdateUserError("CHECK", manifestCommitOrErr)
   setDownloadedState(false, 0)
   if manifestReady then
@@ -1427,6 +1534,7 @@ local function performUpdateDownload()
   state.update.applyConfirmArmed = false
   setIntegrityStatus(INTEGRITY_STATUS.PENDING, "download + hash validation in progress", true)
   setUpdateStatus(UPDATE_STATUS.DOWNLOADING, "preparing staging directory", true)
+  resetDownloadProgress(UPDATE_STATUS.DOWNLOADING, "preparing staging directory")
   appendUpdateLogLine("DOWNLOAD start")
 
   if not state.update.remoteManifest then
@@ -1466,14 +1574,89 @@ local function performUpdateDownload()
   end
 
   fs.makeDir(UPDATE_TEMP_DIR)
-  appendUpdateLogLine("DOWNLOAD files planned: " .. tostring(#(remoteManifest.files or {})))
+  local plannedFiles = remoteManifest.files or {}
+  local totalFiles = #plannedFiles
+  local totalExpectedBytes = sumManifestEntrySizes(plannedFiles)
+  setDownloadProgress({
+    phase = UPDATE_STATUS.DOWNLOADING,
+    totalFiles = totalFiles,
+    completedFiles = 0,
+    totalBytesExpected = totalExpectedBytes,
+    totalBytesCompleted = 0,
+    currentFile = "-",
+    currentFileSize = 0,
+    note = "download started",
+  })
+  appendUpdateLogLine("DOWNLOAD files planned: " .. tostring(totalFiles))
+  appendUpdateLogLine("DOWNLOAD expected bytes: " .. tostring(totalExpectedBytes))
 
-  local downloaded, downloadErr = UpdateClient.downloadFiles(remoteSource, remoteManifest.files, UPDATE_TEMP_DIR, appendUpdateLogLine)
+  local function onDownloadProgress(event)
+    if type(event) ~= "table" then
+      return
+    end
+
+    local phase = type(event.phase) == "string" and event.phase ~= "" and event.phase or UPDATE_STATUS.DOWNLOADING
+    local totalFilesEvent = type(event.totalFiles) == "number" and event.totalFiles or state.update.downloadProgress.totalFiles
+    local completedFilesEvent = type(event.completedFiles) == "number" and event.completedFiles or state.update.downloadProgress.completedFiles
+    local totalBytesExpectedEvent = type(event.totalBytesExpected) == "number" and event.totalBytesExpected or state.update.downloadProgress.totalBytesExpected
+    local totalBytesCompletedEvent = type(event.totalBytesCompleted) == "number" and event.totalBytesCompleted or state.update.downloadProgress.totalBytesCompleted
+    local currentPath = type(event.path) == "string" and event.path ~= "" and event.path or state.update.downloadProgress.currentFile
+    local currentFileSize = 0
+    if type(event.expectedSize) == "number" then
+      currentFileSize = math.max(0, math.floor(event.expectedSize))
+    elseif type(event.receivedSize) == "number" then
+      currentFileSize = math.max(0, math.floor(event.receivedSize))
+    else
+      currentFileSize = state.update.downloadProgress.currentFileSize or 0
+    end
+
+    setDownloadProgress({
+      phase = phase,
+      totalFiles = totalFilesEvent,
+      completedFiles = completedFilesEvent,
+      totalBytesExpected = totalBytesExpectedEvent,
+      totalBytesCompleted = totalBytesCompletedEvent,
+      currentFile = currentPath,
+      currentFileSize = currentFileSize,
+      note = type(event.event) == "string" and event.event or state.update.downloadProgress.note,
+    })
+
+    local percent = math.floor((state.update.downloadProgress.percent or 0) + 0.5)
+    local progressSummary = tostring(state.update.downloadProgress.completedFiles or 0) .. "/" .. tostring(state.update.downloadProgress.totalFiles or 0)
+      .. " files, " .. tostring(state.update.downloadProgress.totalBytesCompleted or 0) .. "/" .. tostring(state.update.downloadProgress.totalBytesExpected or 0)
+      .. " bytes (" .. tostring(percent) .. "%)"
+
+    if event.event == "file_start" then
+      setUpdateStatus(UPDATE_STATUS.DOWNLOADING, "downloading " .. tostring(currentPath) .. " (" .. progressSummary .. ")", false)
+      appendUpdateLogLine("DOWNLOAD file start: " .. tostring(currentPath) .. " expected=" .. tostring(currentFileSize) .. "B url=" .. tostring(event.url or "n/a"))
+    elseif event.event == "file_validating" then
+      setUpdateStatus(UPDATE_STATUS.VALIDATING, "validating " .. tostring(currentPath), false)
+      appendUpdateLogLine("DOWNLOAD file validating: " .. tostring(currentPath) .. " expected=" .. tostring(event.expectedSize or "?") .. "B received=" .. tostring(event.receivedSize or "?") .. "B")
+    elseif event.event == "file_done" then
+      setUpdateStatus(UPDATE_STATUS.DOWNLOADING, "downloaded " .. tostring(progressSummary), false)
+      appendUpdateLogLine("DOWNLOAD progress: " .. tostring(progressSummary))
+    elseif event.event == "complete" then
+      setUpdateStatus(UPDATE_STATUS.VALIDATING, "download complete, validating staging", false)
+      setDownloadProgress({
+        phase = UPDATE_STATUS.VALIDATING,
+        note = "download complete, validating staging",
+      })
+      appendUpdateLogLine("DOWNLOAD transfer complete: " .. tostring(progressSummary))
+    end
+  end
+
+  local downloaded, downloadErr = UpdateClient.downloadFiles(remoteSource, plannedFiles, UPDATE_TEMP_DIR, appendUpdateLogLine, onDownloadProgress)
   if not downloaded then
     clearStagingWithLog("download failure")
     setDownloadedState(false, 0)
     return failUpdateStep("DOWNLOAD", UPDATE_STATUS.DOWNLOAD_FAILED, downloadErr)
   end
+
+  setUpdateStatus(UPDATE_STATUS.VALIDATING, "finalizing staging metadata", true)
+  setDownloadProgress({
+    phase = UPDATE_STATUS.VALIDATING,
+    note = "finalizing staging metadata",
+  })
 
   local stagingContext = {
     remoteVersion = tostring(state.update.remoteVersion or "n/a"),
@@ -1499,6 +1682,15 @@ local function performUpdateDownload()
 
   setIntegrityStatus(INTEGRITY_STATUS.OK, "staging integrity validated for commit " .. tostring(shortCommit(manifestCommit, 8)), true)
   setDownloadedState(true, #downloaded)
+  setDownloadProgress({
+    phase = UPDATE_STATUS.READY_TO_APPLY,
+    completedFiles = #downloaded,
+    totalFiles = totalFiles,
+    totalBytesCompleted = state.update.downloadProgress.totalBytesExpected,
+    currentFile = "-",
+    currentFileSize = 0,
+    note = "ready to apply",
+  })
   state.update.lastDownload = nowText()
   state.update.lastError = "none"
   state.update.lastCheckSummary = "ready to apply"
@@ -1776,6 +1968,7 @@ local function drawUpdatePage(r)
     drawPanel = drawPanel,
     drawToggleRow = drawToggleRow,
     drawText = drawText,
+    drawGauge = drawGauge,
     drawButton = drawButton,
     sv = sv,
     firstLine = firstLine,

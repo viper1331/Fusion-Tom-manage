@@ -68,6 +68,35 @@ local function resolveSourceRef(source)
   return "main"
 end
 
+local function toNonNegativeInt(value)
+  local num = tonumber(value)
+  if not num then
+    return 0
+  end
+  return math.max(0, math.floor(num))
+end
+
+local function sumExpectedBytes(fileEntries)
+  local total = 0
+  for _, entry in ipairs(fileEntries or {}) do
+    if type(entry) == "table" and type(entry.size) == "number" and entry.size >= 0 then
+      total = total + toNonNegativeInt(entry.size)
+    end
+  end
+  return total
+end
+
+local function emitProgress(callback, payload, logger)
+  if type(callback) ~= "function" then
+    return
+  end
+
+  local ok, callbackErr = pcall(callback, payload)
+  if not ok and logger then
+    logger("download progress callback error: " .. tostring(callbackErr))
+  end
+end
+
 local function buildTemplateBaseUrl(source)
   local base = normalizeUrl(source and source.rawBaseUrl or "")
   local owner = tostring(source and source.owner or "")
@@ -195,7 +224,7 @@ function M.downloadFile(source, relativePath, destinationPath, entry, resolvedUr
   }
 end
 
-function M.downloadFiles(source, fileEntries, targetDir, logger)
+function M.downloadFiles(source, fileEntries, targetDir, logger, onProgress)
   if type(fileEntries) ~= "table" then
     return nil, "invalid file list for download"
   end
@@ -209,6 +238,10 @@ function M.downloadFiles(source, fileEntries, targetDir, logger)
   end
 
   local out = {}
+  local totalFiles = #fileEntries
+  local totalBytesExpected = sumExpectedBytes(fileEntries)
+  local totalBytesCompleted = 0
+
   for i, entry in ipairs(fileEntries) do
     local relativePath = type(entry) == "table" and entry.path or nil
     if type(relativePath) ~= "string" or relativePath == "" then
@@ -217,6 +250,21 @@ function M.downloadFiles(source, fileEntries, targetDir, logger)
 
     local normalizedPath = normalizePath(relativePath)
     local requestedUrl = M.buildRawUrl(source, normalizedPath)
+    local expectedSize = type(entry.size) == "number" and toNonNegativeInt(entry.size) or nil
+
+    emitProgress(onProgress, {
+      event = "file_start",
+      phase = "DOWNLOADING",
+      path = normalizedPath,
+      index = i,
+      totalFiles = totalFiles,
+      completedFiles = i - 1,
+      expectedSize = expectedSize,
+      totalBytesExpected = totalBytesExpected,
+      totalBytesCompleted = totalBytesCompleted,
+      url = requestedUrl,
+    }, logger)
+
     if logger then
       logger("downloading " .. tostring(normalizedPath) .. " <- " .. tostring(requestedUrl))
     end
@@ -225,6 +273,20 @@ function M.downloadFiles(source, fileEntries, targetDir, logger)
     if not downloaded then
       return nil, err
     end
+
+    emitProgress(onProgress, {
+      event = "file_validating",
+      phase = "VALIDATING",
+      path = normalizedPath,
+      index = i,
+      totalFiles = totalFiles,
+      completedFiles = i - 1,
+      expectedSize = expectedSize,
+      receivedSize = downloaded.size,
+      totalBytesExpected = totalBytesExpected,
+      totalBytesCompleted = totalBytesCompleted,
+      url = requestedUrl,
+    }, logger)
 
     if type(entry.size) == "number" and entry.size >= 0 and downloaded.size ~= entry.size then
       local mismatch = "size mismatch for " .. tostring(normalizedPath)
@@ -265,6 +327,21 @@ function M.downloadFiles(source, fileEntries, targetDir, logger)
       downloaded.hashAlgo = hashAlgo
     end
 
+    totalBytesCompleted = totalBytesCompleted + toNonNegativeInt(downloaded.size)
+    emitProgress(onProgress, {
+      event = "file_done",
+      phase = "DOWNLOADING",
+      path = normalizedPath,
+      index = i,
+      totalFiles = totalFiles,
+      completedFiles = i,
+      expectedSize = expectedSize,
+      receivedSize = downloaded.size,
+      totalBytesExpected = totalBytesExpected,
+      totalBytesCompleted = totalBytesCompleted,
+      url = requestedUrl,
+    }, logger)
+
     out[#out + 1] = downloaded
     if logger then
       logger("downloaded " .. tostring(downloaded.path) .. " (" .. tostring(downloaded.size) .. " bytes) from " .. tostring(downloaded.url))
@@ -273,6 +350,16 @@ function M.downloadFiles(source, fileEntries, targetDir, logger)
       end
     end
   end
+
+  emitProgress(onProgress, {
+    event = "complete",
+    phase = "READY TO APPLY",
+    index = totalFiles,
+    totalFiles = totalFiles,
+    completedFiles = totalFiles,
+    totalBytesExpected = totalBytesExpected,
+    totalBytesCompleted = totalBytesCompleted,
+  }, logger)
 
   return out
 end

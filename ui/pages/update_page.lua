@@ -2,12 +2,108 @@ local RenderCommon = assert(dofile("ui/helpers/render_common.lua"))
 
 local M = {}
 
+local function toInt(value)
+  local n = tonumber(value)
+  if not n then
+    return 0
+  end
+  return math.max(0, math.floor(n))
+end
+
+local function toPercent(value)
+  local n = tonumber(value)
+  if not n then
+    return 0
+  end
+  if n < 0 then
+    return 0
+  end
+  if n > 100 then
+    return 100
+  end
+  return n
+end
+
+local function basename(path)
+  local normalized = tostring(path or "")
+  normalized = string.gsub(normalized, "\\", "/")
+  local name = string.match(normalized, "[^/]+$")
+  if type(name) == "string" and name ~= "" then
+    return name
+  end
+  return normalized
+end
+
+local function shorten(text, maxLen)
+  local value = tostring(text or "")
+  local limit = math.max(4, math.floor(maxLen or 16))
+  if #value <= limit then
+    return value
+  end
+  return string.sub(value, 1, limit - 3) .. "..."
+end
+
+local function buildDownloadProgress(updateState)
+  local raw = type(updateState.downloadProgress) == "table" and updateState.downloadProgress or {}
+  local totalFiles = toInt(raw.totalFiles)
+  local completedFiles = toInt(raw.completedFiles)
+  local totalBytesExpected = toInt(raw.totalBytesExpected)
+  local totalBytesCompleted = toInt(raw.totalBytesCompleted)
+  local phase = type(raw.phase) == "string" and raw.phase ~= "" and raw.phase or (updateState.remoteStatus or "IDLE")
+  local currentFile = type(raw.currentFile) == "string" and raw.currentFile ~= "" and raw.currentFile or "-"
+  local percent = toPercent(raw.percent)
+
+  if percent <= 0 then
+    if totalBytesExpected > 0 then
+      percent = toPercent((totalBytesCompleted * 100) / totalBytesExpected)
+    elseif totalFiles > 0 then
+      percent = toPercent((completedFiles * 100) / totalFiles)
+    end
+  end
+
+  return {
+    phase = phase,
+    currentFile = currentFile,
+    currentFileBase = basename(currentFile),
+    totalFiles = totalFiles,
+    completedFiles = completedFiles,
+    totalBytesExpected = totalBytesExpected,
+    totalBytesCompleted = totalBytesCompleted,
+    percent = percent,
+    percentText = tostring(math.floor(percent + 0.5)) .. "%",
+    filesText = tostring(completedFiles) .. " / " .. tostring(totalFiles) .. " fichiers",
+    bytesText = tostring(totalBytesCompleted) .. " / " .. tostring(totalBytesExpected) .. " B",
+  }
+end
+
+local function shortDownloadStatus(status)
+  if status == "DOWNLOADING" then
+    return "DL"
+  end
+  if status == "VALIDATING" then
+    return "VAL"
+  end
+  if status == "READY TO APPLY" then
+    return "READY"
+  end
+  if status == "DOWNLOAD FAILED" then
+    return "FAIL"
+  end
+  if status == "UP TO DATE" then
+    return "OK"
+  end
+  return shorten(status, 6)
+end
+
 local function buildStatusRows(ctx)
   local updateState = ctx.updateState
   local C = ctx.colors
+  local progress = buildDownloadProgress(updateState)
 
   return {
     { label = "STATUS", value = updateState.remoteStatus, color = ctx.updateStatusColor(updateState.remoteStatus) },
+    { label = "DL STATUS", value = progress.phase, color = ctx.updateStatusColor(progress.phase) },
+    { label = "DL PROGRESS", value = progress.filesText .. " (" .. progress.percentText .. ")", color = C.cyan },
     { label = "DETAIL", value = updateState.statusDetail ~= "" and updateState.statusDetail or "-", color = C.muted },
     { label = "INTEGRITY", value = updateState.integrityStatus, color = ctx.integrityStatusColor(updateState.integrityStatus) },
     {
@@ -49,6 +145,7 @@ function M.drawMicro(args)
     w = r.w - ui.smallPad * 2,
     h = r.h - infoH - args.sv(18) - ui.smallPad * 2,
   }
+  local progress = buildDownloadProgress(updateState)
 
   local rowY = infoRect.y + 2
   args.drawText(infoRect.x + 1, rowY, "LV", C.text, 1)
@@ -68,15 +165,15 @@ function M.drawMicro(args)
 
   rowY = rowY + 9
   args.drawText(infoRect.x + 1, rowY, "ST", C.text, 1)
-  args.drawTextRight(infoRect.x + infoRect.w - 1, rowY, updateState.remoteStatus, args.updateStatusColor(updateState.remoteStatus), 1)
+  args.drawTextRight(infoRect.x + infoRect.w - 1, rowY, shortDownloadStatus(progress.phase), args.updateStatusColor(progress.phase), 1)
 
   rowY = rowY + 9
-  args.drawText(infoRect.x + 1, rowY, "FL", C.text, 1)
-  args.drawTextRight(infoRect.x + infoRect.w - 1, rowY, tostring(updateState.filesToUpdate), updateState.filesToUpdate > 0 and C.orange or C.green, 1)
+  args.drawText(infoRect.x + 1, rowY, "DL", C.text, 1)
+  args.drawTextRight(infoRect.x + infoRect.w - 1, rowY, tostring(progress.completedFiles) .. "/" .. tostring(progress.totalFiles), C.cyan, 1)
 
   rowY = rowY + 9
-  args.drawText(infoRect.x + 1, rowY, "IN", C.text, 1)
-  args.drawTextRight(infoRect.x + infoRect.w - 1, rowY, args.shortIntegrityStatus(updateState.integrityStatus), args.integrityStatusColor(updateState.integrityStatus), 1)
+  args.drawText(infoRect.x + 1, rowY, "%", C.text, 1)
+  args.drawTextRight(infoRect.x + infoRect.w - 1, rowY, progress.percentText, C.yellow, 1)
 
   local pad = 1
   local gap = math.max(1, math.floor(ui.smallPad * 0.6))
@@ -112,8 +209,34 @@ function M.draw(args)
   end
 
   args.drawPanel(statusRect.x, statusRect.y, statusRect.w, statusRect.h, "MAJ STATUS")
-  local baseY = statusRect.y + args.sv(54)
   local step = math.max(12, args.sv(16))
+  local progress = buildDownloadProgress(updateState)
+  local gaugeX = statusRect.x + ui.pad
+  local gaugeW = statusRect.w - ui.pad * 2
+  local gaugeY = statusRect.y + args.sv(54)
+  local gaugeH = math.max(ui.gaugeH, args.sv(14))
+  local progressColor = progress.phase == "DOWNLOAD FAILED" and C.red or (progress.phase == "READY TO APPLY" and C.green or C.cyan)
+
+  if type(args.drawGauge) == "function" then
+    args.drawGauge(gaugeX, gaugeY, gaugeW, gaugeH, progress.percent, progressColor, "DOWNLOAD", progress.percentText)
+  else
+    args.drawToggleRow(statusRect, gaugeY, "DOWNLOAD", progress.filesText .. " " .. progress.percentText, progressColor)
+  end
+
+  local rowY = gaugeY + gaugeH + args.sv(8)
+  local currentFileValue = ui.compact and shorten(progress.currentFileBase, 20) or shorten(progress.currentFile, 42)
+  args.drawToggleRow(statusRect, rowY, "FILES", progress.filesText, C.cyan)
+  rowY = rowY + step
+  args.drawToggleRow(statusRect, rowY, "CURRENT FILE", currentFileValue, C.text)
+  rowY = rowY + step
+  args.drawToggleRow(statusRect, rowY, "DOWNLOAD STATUS", progress.phase, args.updateStatusColor(progress.phase))
+  rowY = rowY + step
+  if not ui.compact then
+    args.drawToggleRow(statusRect, rowY, "BYTES", progress.bytesText, C.muted)
+    rowY = rowY + step
+  end
+
+  local baseY = rowY + args.sv(6)
   local statusRows = buildStatusRows({
     updateState = updateState,
     colors = C,
@@ -124,7 +247,7 @@ function M.draw(args)
     firstLine = args.firstLine,
   })
 
-  local maxRows = math.max(4, math.floor((statusRect.h - args.sv(58)) / step))
+  local maxRows = math.max(2, math.floor((statusRect.y + statusRect.h - baseY - ui.pad) / step))
   RenderCommon.drawToggleRows({
     rect = statusRect,
     rows = statusRows,
