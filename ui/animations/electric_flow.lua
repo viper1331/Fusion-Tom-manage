@@ -1,5 +1,40 @@
 local M = {}
 
+local CALIBRATION = {
+  module = {
+    yRatio = 0.500,
+    thicknessRatio = 0.110,
+    leftOuterRatio = 0.095,
+    leftInnerRatio = 0.295,
+    rightInnerRatio = 0.695,
+    rightOuterRatio = 0.900,
+  },
+  reactorRight = {
+    yRatio = 0.513,
+    thicknessRatio = 0.014,
+    startXRatio = 0.752,
+    endXRatio = 0.913,
+    particleScale = 0.78,
+    particleHeightScale = 0.85,
+  },
+  bottom = {
+    topYRatio = 0.822,
+    bottomYRatio = 0.952,
+    thicknessRatio = 0.0075,
+    axisGlow = 0x15000000,
+    particleW = 1,
+    particleH = 2,
+    trailSteps = 1,
+    channels = {
+      -- Required left -> right order from field calibration:
+      -- tritium (green), DT-Fuel (violet), deuterium (red)
+      { ratio = 0.334, key = "tritium", color = 0xFF4DE06D, glow = 0x164DE06D, trail = 0x554DE06D, speed = 6, count = 2 },
+      { ratio = 0.452, key = "dtFuel", color = 0xFFB26BFF, glow = 0x16B26BFF, trail = 0x55B26BFF, speed = 5, count = 2 },
+      { ratio = 0.567, key = "deuterium", color = 0xFFFF5A5A, glow = 0x16FF5A5A, trail = 0x55FF5A5A, speed = 6, count = 2 },
+    },
+  },
+}
+
 local function pulseWave(frame, period)
   local safePeriod = math.max(2, tonumber(period) or 2)
   local t = frame % safePeriod
@@ -162,8 +197,10 @@ local function drawHorizontalParticleFlow(args, spec)
   gpu.filledRectangle(x1, y - math.floor(thickness / 2), lineW, thickness, style.baseGlow)
 
   local travel = math.max(4, x2 - x1)
-  local packetW = math.max(1, math.floor(thickness * (args.ui and args.ui.micro and 0.75 or 0.95)))
-  local packetH = math.max(1, thickness)
+  local packetScale = spec.particleScale or (args.ui and args.ui.micro and 0.75 or 0.95)
+  local packetHeightScale = spec.particleHeightScale or 1.00
+  local packetW = math.max(1, math.floor(thickness * packetScale))
+  local packetH = math.max(1, math.floor(thickness * packetHeightScale))
   local trailSteps = (args.ui and args.ui.micro) and 1 or 2
   local trailStep = math.max(1, math.floor(packetW * 0.90))
   local speed = math.max(1, math.floor(style.speed * intensity))
@@ -222,18 +259,22 @@ local function drawVerticalParticleFlow(args, spec)
   local style = getFlowStyle(mode)
 
   local baseGlow = spec.glow or style.baseGlow
+  local axisGlow = spec.axisGlow or baseGlow
   local packetColor = spec.color or style.particle
   local trailColor = spec.trail or style.trail
   local speed = math.max(1, math.floor((spec.speed or style.speed) * intensity))
   local count = math.max(1, math.floor((spec.count or style.count) * density + 0.5))
 
   local lineH = math.max(1, y2 - y1 + 1)
-  gpu.filledRectangle(x - math.floor(thickness / 2), y1, thickness, lineH, baseGlow)
+  local axisThickness = math.max(1, spec.axisThickness or thickness)
+  if spec.drawBaseLine ~= false then
+    gpu.filledRectangle(x - math.floor(axisThickness / 2), y1, axisThickness, lineH, axisGlow)
+  end
 
   local travel = math.max(4, y2 - y1)
-  local packetW = math.max(1, thickness)
-  local packetH = math.max(2, math.floor(thickness * (args.ui and args.ui.micro and 1.1 or 1.5)))
-  local trailSteps = (args.ui and args.ui.micro) and 1 or 2
+  local packetW = math.max(1, spec.packetW or thickness)
+  local packetH = math.max(1, spec.packetH or math.floor(thickness * (args.ui and args.ui.micro and 1.1 or 1.5)))
+  local trailSteps = spec.trailSteps or ((args.ui and args.ui.micro) and 1 or 2)
   local trailStep = math.max(1, packetH)
 
   for i = 1, count do
@@ -264,14 +305,14 @@ function M.drawModuleFlux(args, x, y, w, h, data)
     return
   end
 
-  local cableY = y + math.floor(h * 0.50)
-  local thickness = math.max(2, math.floor(h * 0.12))
+  local cableY = y + math.floor(h * CALIBRATION.module.yRatio)
+  local thickness = math.max(2, math.floor(h * CALIBRATION.module.thicknessRatio))
   local intensity = resolveFlowIntensity(data, mode)
 
-  local leftOuter = x + math.floor(w * 0.095)
-  local leftInner = x + math.floor(w * 0.295)
-  local rightInner = x + math.floor(w * 0.695)
-  local rightOuter = x + math.floor(w * 0.900)
+  local leftOuter = x + math.floor(w * CALIBRATION.module.leftOuterRatio)
+  local leftInner = x + math.floor(w * CALIBRATION.module.leftInnerRatio)
+  local rightInner = x + math.floor(w * CALIBRATION.module.rightInnerRatio)
+  local rightOuter = x + math.floor(w * CALIBRATION.module.rightOuterRatio)
 
   drawHorizontalParticleFlow(args, {
     x1 = leftOuter,
@@ -300,10 +341,10 @@ function M.drawReactorRightFlux(args, x, y, w, h, data)
     return
   end
 
-  local cableY = y + math.floor(h * 0.516)
-  local thickness = math.max(2, math.floor(h * 0.018))
-  local startX = x + math.floor(w * 0.748)
-  local endX = x + math.floor(w * 0.915)
+  local cableY = y + math.floor(h * CALIBRATION.reactorRight.yRatio)
+  local thickness = math.max(1, math.floor(h * CALIBRATION.reactorRight.thicknessRatio))
+  local startX = x + math.floor(w * CALIBRATION.reactorRight.startXRatio)
+  local endX = x + math.floor(w * CALIBRATION.reactorRight.endXRatio)
   local intensity = resolveFlowIntensity(data, mode)
 
   if mode == "running" then
@@ -318,6 +359,8 @@ function M.drawReactorRightFlux(args, x, y, w, h, data)
     mode = mode,
     reverse = false,
     intensity = intensity,
+    particleScale = CALIBRATION.reactorRight.particleScale,
+    particleHeightScale = CALIBRATION.reactorRight.particleHeightScale,
   })
 end
 
@@ -331,19 +374,22 @@ function M.drawReactorBottomFlux(args, x, y, w, h, data)
     return
   end
 
-  local topY = y + math.floor(h * 0.815)
-  local bottomY = y + math.floor(h * 0.955)
-  local thickness = math.max(2, math.floor(w * 0.010))
-  local intensity = resolveFlowIntensity(data, mode)
+  local topY = y + math.floor(h * CALIBRATION.bottom.topYRatio)
+  local bottomY = y + math.floor(h * CALIBRATION.bottom.bottomYRatio)
+  local thickness = math.max(1, math.floor(w * CALIBRATION.bottom.thicknessRatio))
+  local intensity = resolveFlowIntensity(data, mode) * 0.92
 
-  local channels = {
-    { ratio = 0.334, color = 0xFF4DE06D, glow = 0x224DE06D, trail = 0x664DE06D, speed = 6, count = 2, enabled = data.readers and data.readers.deuterium and data.readers.deuterium.ok },
-    { ratio = 0.455, color = 0xFFFFCC55, glow = 0x22FFCC55, trail = 0x66FFCC55, speed = 5, count = 2, enabled = (tonumber(data.dtPct) or 0) > 0 },
-    { ratio = 0.562, color = 0xFF5BE8FF, glow = 0x225BE8FF, trail = 0x665BE8FF, speed = 7, count = 2, enabled = data.readers and data.readers.tritium and data.readers.tritium.ok },
-  }
+  for _, channel in ipairs(CALIBRATION.bottom.channels) do
+    local enabled = false
+    if channel.key == "tritium" then
+      enabled = data.readers and data.readers.tritium and data.readers.tritium.ok
+    elseif channel.key == "dtFuel" then
+      enabled = (tonumber(data.dtPct) or 0) > 0
+    elseif channel.key == "deuterium" then
+      enabled = data.readers and data.readers.deuterium and data.readers.deuterium.ok
+    end
 
-  for _, channel in ipairs(channels) do
-    if channel.enabled then
+    if enabled then
       local cx = x + math.floor(w * channel.ratio)
       drawVerticalParticleFlow(args, {
         x = cx,
@@ -358,6 +404,11 @@ function M.drawReactorBottomFlux(args, x, y, w, h, data)
         trail = channel.trail,
         speed = channel.speed,
         count = channel.count,
+        axisThickness = 1,
+        axisGlow = CALIBRATION.bottom.axisGlow,
+        packetW = CALIBRATION.bottom.particleW,
+        packetH = (args.ui and args.ui.micro) and 1 or CALIBRATION.bottom.particleH,
+        trailSteps = CALIBRATION.bottom.trailSteps,
       })
     end
   end

@@ -96,14 +96,14 @@ function M.drawImageStack(args)
   drawReactorBottomGasFluxAt(args, reactorX, startY, reactorVariant.width, reactorVariant.height, data)
 
   if configuredCount > drawnModuleCount then
-    local badgeW = math.max(26, math.floor(slotW * 0.28))
-    local badgeH = 12
-    local badgeX = slotX + slotW - badgeW - 2
-    local badgeY = slotY + 2
+    local badgeW = math.max(18, math.floor(slotW * 0.16))
+    local badgeH = ui.micro and 9 or 10
+    local badgeX = slotX + slotW - badgeW - 1
+    local badgeY = slotY + 1
 
-    gpu.filledRectangle(badgeX, badgeY, badgeW, badgeH, C.panel)
+    gpu.filledRectangle(badgeX, badgeY, badgeW, badgeH, C.panel2 or C.panel)
     gpu.rectangle(badgeX, badgeY, badgeW, badgeH, C.border)
-    drawTextCenter(badgeX, badgeY + 2, badgeW, "x" .. tostring(configuredCount), C.yellow, 1)
+    drawTextCenter(badgeX, badgeY + math.max(0, math.floor((badgeH - textPixelHeight(1)) / 2)), badgeW, "x" .. tostring(configuredCount), C.muted, 1)
   end
 end
 

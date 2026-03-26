@@ -107,18 +107,19 @@ local function drawOverviewImageZone(args, zones)
   gpu.rectangle(badgeX, badgeY, badgeW, badgeH, C.border)
   args.drawTextCenter(badgeX, badgeY + math.max(0, math.floor((badgeH - args.textPixelHeight(1)) / 2)), badgeW, data.status, statusColor, 1)
 
-  local countBadgeW = math.max(90, sv(116))
-  local countBadgeH = badgeH
-  local countBadgeX = badgeX
-  local countBadgeY = badgeY + badgeH + math.max(2, math.floor(ui.smallPad * 0.5))
-  gpu.filledRectangle(countBadgeX, countBadgeY, countBadgeW, countBadgeH, C.panel)
+  local laserCountText = ui.micro and ("Lx" .. tostring(args.control.laserModuleCount)) or ("LASER x" .. tostring(args.control.laserModuleCount))
+  local countBadgeW = ui.micro and math.max(44, sv(56)) or (ui.compact and math.max(62, sv(76)) or math.max(72, sv(88)))
+  local countBadgeH = ui.micro and math.max(11, sv(12)) or math.max(12, sv(14))
+  local countBadgeX = innerX + innerW - countBadgeW - ui.smallPad
+  local countBadgeY = badgeY + badgeH + math.max(1, math.floor(ui.smallPad * 0.35))
+  gpu.filledRectangle(countBadgeX, countBadgeY, countBadgeW, countBadgeH, C.panel2)
   gpu.rectangle(countBadgeX, countBadgeY, countBadgeW, countBadgeH, C.border)
   args.drawTextCenter(
     countBadgeX,
     countBadgeY + math.max(0, math.floor((countBadgeH - args.textPixelHeight(1)) / 2)),
     countBadgeW,
-    "LASER x" .. tostring(args.control.laserModuleCount),
-    C.yellow,
+    laserCountText,
+    C.muted,
     1
   )
 end

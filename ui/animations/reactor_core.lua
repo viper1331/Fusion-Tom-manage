@@ -1,5 +1,14 @@
 local M = {}
 
+local CALIBRATION = {
+  centerXRatio = 0.438,
+  centerYRatio = 0.458,
+  compactScale = 0.82,
+  microScale = 0.68,
+  baseRadiusXRatio = 0.0098,
+  baseRadiusYRatio = 0.0140,
+}
+
 local function pulseWave(frame, period)
   local safePeriod = math.max(2, tonumber(period) or 2)
   local t = frame % safePeriod
@@ -79,6 +88,18 @@ local function resolveCoreState(data)
   end
 
   return "running"
+end
+
+local function drawSoftEllipse(gpu, cx, cy, radiusX, radiusY, color)
+  local rx = math.max(1, math.floor(radiusX))
+  local ry = math.max(1, math.floor(radiusY))
+  for dy = -ry, ry do
+    local yNorm = dy / ry
+    local span = math.floor(rx * math.sqrt(math.max(0, 1 - (yNorm * yNorm))))
+    if span > 0 then
+      gpu.filledRectangle(cx - span, cy + dy, span * 2 + 1, 1, color)
+    end
+  end
 end
 
 local function buildStateStyle(data, stateName, frame)
@@ -187,42 +208,41 @@ function M.draw(args, x, y, w, h, data)
   local style = buildStateStyle(data, coreState, frame)
   local ui = args.ui or {}
 
-  local cx = x + math.floor(w * 0.438)
-  local cy = y + math.floor(h * 0.462)
+  local scale = 1.00
+  if ui.micro then
+    scale = CALIBRATION.microScale
+  elseif ui.compact then
+    scale = CALIBRATION.compactScale
+  end
 
-  local baseW = math.max(8, math.floor(w * (ui.micro and 0.030 or 0.038)))
-  local baseH = math.max(10, math.floor(h * (ui.micro and 0.045 or 0.055)))
+  local cx = x + math.floor(w * CALIBRATION.centerXRatio)
+  local cy = y + math.floor(h * CALIBRATION.centerYRatio)
+
+  local baseRadiusX = math.max(2, math.floor(w * CALIBRATION.baseRadiusXRatio * scale))
+  local baseRadiusY = math.max(3, math.floor(h * CALIBRATION.baseRadiusYRatio * scale))
   local pulse = pulseWave(frame + 3, style.pulsePeriod)
   local drift = (((frame * 11) % 17) / 17) * style.flicker
-  local haloFactor = (0.88 + (pulse * 0.25) + drift) * style.haloBoost
+  local haloFactor = (0.90 + (pulse * 0.18) + drift) * style.haloBoost
 
-  local outerW = math.max(10, math.floor(baseW * 1.95 * haloFactor))
-  local outerH = math.max(12, math.floor(baseH * 2.05 * haloFactor))
-  local midW = math.max(8, math.floor(baseW * 1.45 * haloFactor))
-  local midH = math.max(10, math.floor(baseH * 1.55 * haloFactor))
-  local innerW = math.max(6, math.floor(baseW * 1.05 * haloFactor))
-  local innerH = math.max(8, math.floor(baseH * 1.12 * haloFactor))
+  local outerRx = math.max(3, math.floor(baseRadiusX * 2.30 * haloFactor))
+  local outerRy = math.max(4, math.floor(baseRadiusY * 2.35 * haloFactor))
+  local midRx = math.max(2, math.floor(baseRadiusX * 1.65 * haloFactor))
+  local midRy = math.max(3, math.floor(baseRadiusY * 1.70 * haloFactor))
+  local innerRx = math.max(2, math.floor(baseRadiusX * 1.20 * haloFactor))
+  local innerRy = math.max(2, math.floor(baseRadiusY * 1.25 * haloFactor))
 
-  local outerX = cx - math.floor(outerW / 2)
-  local outerY = cy - math.floor(outerH / 2)
-  local midX = cx - math.floor(midW / 2)
-  local midY = cy - math.floor(midH / 2)
-  local innerX = cx - math.floor(innerW / 2)
-  local innerY = cy - math.floor(innerH / 2)
+  drawSoftEllipse(gpu, cx, cy, outerRx, outerRy, style.outer)
+  drawSoftEllipse(gpu, cx, cy, midRx, midRy, style.mid)
+  drawSoftEllipse(gpu, cx, cy, innerRx, innerRy, style.inner)
 
-  gpu.filledRectangle(outerX, outerY, outerW, outerH, style.outer)
-  gpu.filledRectangle(midX, midY, midW, midH, style.mid)
-  gpu.filledRectangle(innerX, innerY, innerW, innerH, style.inner)
-
-  local coreW = math.max(3, math.floor(innerW * (ui.micro and 0.42 or 0.48)))
-  local coreH = math.max(4, math.floor(innerH * (ui.micro and 0.50 or 0.56)))
-  local coreX = cx - math.floor(coreW / 2)
-  local coreY = cy - math.floor(coreH / 2)
-  gpu.filledRectangle(coreX, coreY, coreW, coreH, style.core)
+  local coreRx = math.max(1, math.floor(innerRx * (ui.micro and 0.42 or 0.48)))
+  local coreRy = math.max(1, math.floor(innerRy * (ui.micro and 0.45 or 0.52)))
+  drawSoftEllipse(gpu, cx, cy, coreRx, coreRy, style.core)
+  drawSoftEllipse(gpu, cx, cy - 1, math.max(1, coreRx - 1), math.max(1, coreRy - 1), 0xAAFFFFFF)
 
   if style.sparkCount > 0 then
-    local sparkRadiusX = math.max(2, math.floor(innerW * 0.62))
-    local sparkRadiusY = math.max(2, math.floor(innerH * 0.66))
+    local sparkRadiusX = math.max(1, math.floor(innerRx * 1.08))
+    local sparkRadiusY = math.max(1, math.floor(innerRy * 1.12))
     local sparkSize = ui.micro and 1 or 2
 
     for i = 1, style.sparkCount do
@@ -235,11 +255,11 @@ function M.draw(args, x, y, w, h, data)
   end
 
   if coreState == "warning" and (frame % 3 == 0) then
-    gpu.filledRectangle(coreX - 1, coreY - 1, coreW + 2, coreH + 2, 0x2AFFFFFF)
+    drawSoftEllipse(gpu, cx, cy, math.max(2, coreRx + 1), math.max(2, coreRy + 1), 0x2AFFFFFF)
   elseif coreState == "ignition" and (frame % 4 <= 1) then
-    gpu.filledRectangle(coreX, coreY, coreW, math.max(1, math.floor(coreH * 0.4)), 0x48FFFFFF)
+    drawSoftEllipse(gpu, cx, cy - 1, math.max(1, coreRx - 1), 1, 0x48FFFFFF)
   elseif coreState == "scram" then
-    gpu.filledRectangle(coreX, coreY + coreH - 1, coreW, 1, 0x402E5A84)
+    drawSoftEllipse(gpu, cx, cy + math.max(1, coreRy), math.max(1, coreRx - 1), 1, 0x402E5A84)
   end
 end
 
