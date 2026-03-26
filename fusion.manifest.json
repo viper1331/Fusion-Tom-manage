@@ -1,6 +1,6 @@
 {
     "name":  "Fusion-Tom-manage",
-    "version":  "1.2.16",
+    "version":  "1.2.17",
     "channel":  "stable",
     "entrypoint":  "start.lua",
     "source":  {
@@ -8,7 +8,7 @@
                    "repo":  "Fusion-Tom-manage",
                    "branch":  "main",
                    "manifestPath":  "fusion.manifest.json",
-                   "commit":  "31c0d6d42804ceb9663ab8562b44239f8fb90939"
+                   "commit":  "794825b07ad45784333fdc6ef4ee2c1672f27071"
                },
     "integrity":  {
                       "mode":  "hash+size",
@@ -41,7 +41,7 @@
                   {
                       "path":  "fusion.version",
                       "size":  7,
-                      "hash":  "e15910100f07274528d58c696204c6ed9577f346839f119bb4a63dadfdfbb6c5",
+                      "hash":  "def65f6e126b8289916c66a36d8532fe268897e174531b44e2b3fb1b0022865b",
                       "hashAlgo":  "sha256"
                   },
                   {
@@ -202,14 +202,14 @@
                   },
                   {
                       "path":  "ui/animations/electric_flow.lua",
-                      "size":  10267,
-                      "hash":  "b8cb6e021fa6f4d40c77eb14ce065dbea3b8d5e6c823df0560ff41c83863a4a8",
+                      "size":  12319,
+                      "hash":  "74f68d46a739e2d8dfa46fee6bc45ec859f401471864fb5076ff258fd8a8b1eb",
                       "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "ui/animations/reactor_core.lua",
-                      "size":  7130,
-                      "hash":  "122e3aae2bf7b545c1fb5471ef02346b4037e6e948521b933f6dbc0d2f4cada5",
+                      "size":  7708,
+                      "hash":  "8299b44720bc925cc460ca491d1512e1ba9943da112b2101a7f3b1363a9c14ab",
                       "hashAlgo":  "sha256"
                   },
                   {
@@ -226,14 +226,14 @@
                   },
                   {
                       "path":  "ui/pages/overview_page.lua",
-                      "size":  6583,
-                      "hash":  "4665cf19a6dfd880dbab709c3872d645806d11ded28f1f164b7cccb69ee8aa3d",
+                      "size":  6857,
+                      "hash":  "434eddff606478cf1473da71a29efb1e9682b2aabf57b448f783cf79acbd1f99",
                       "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "ui/pages/overview_graphics.lua",
-                      "size":  4236,
-                      "hash":  "4c5c1a2cb65af5a96a2f98497c2ca7136762b8c7b63538dfb79ecf004bb74cba",
+                      "size":  4322,
+                      "hash":  "98d986f7dc11d7bc95267681221bc92f875d40c359aeccb372f3b397564ebf52",
                       "hashAlgo":  "sha256"
                   },
                   {
@@ -279,5 +279,5 @@
                       "hashAlgo":  "sha256"
                   }
               ],
-    "commit":  "31c0d6d42804ceb9663ab8562b44239f8fb90939"
+    "commit":  "794825b07ad45784333fdc6ef4ee2c1672f27071"
 }
