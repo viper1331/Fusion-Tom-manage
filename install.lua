@@ -1,8 +1,9 @@
 -- install.lua
 -- Assistant de configuration Fusion Reactor UI
--- Cree fusion_config.lua pour start_menu_pages_live_v2.lua
+-- Cree fusion_config.lua pour start_menu_pages_live_v7.lua
 
 local CONFIG_FILE = "fusion_config.lua"
+local MAIN_SCRIPT = "start_menu_pages_live_v7.lua"
 
 local defaults = {
   devices = {
@@ -240,7 +241,7 @@ local function summary()
     writeConfig(CONFIG_FILE, cfg)
     print("")
     print("Configuration ecrite dans " .. CONFIG_FILE)
-    print("Lancer ensuite: lua start_menu_pages_live_v2.lua")
+    print("Lancer ensuite: lua " .. MAIN_SCRIPT)
   else
     print("")
     print("Annule.")

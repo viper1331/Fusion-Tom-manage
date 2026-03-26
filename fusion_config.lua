@@ -5,7 +5,7 @@ return {
   devices = {
     gpu = "tm_gpu_3",
     fusionController = "mekanismgenerators:fusion_reactor_controller_3",
-    modem = " ",
+    modem = "back",
     readers = {
       tritium = "block_reader_2",
       deuterium = "block_reader_1",
@@ -24,12 +24,12 @@ return {
     },
   },
   control = {
-    laserModuleCount = 7,
+    laserModuleCount = 8,
     relaySides = {
-      laserCharge = "top",
-      deuteriumTank = "front",
-      tritiumTank = "front",
-      aux = "top",
+      laserCharge = "",
+      deuteriumTank = "",
+      tritiumTank = "",
+      aux = "",
     },
     laserPulseSeconds = 0.15,
     telemetryPollMs = 500,

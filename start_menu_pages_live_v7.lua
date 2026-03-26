@@ -1,10 +1,85 @@
 -- fusion_ui_menu_pages.lua
 -- Interface Tom's Peripherals adaptative avec menu et pages dediees de gestion
 
-local GPU_NAME = "tm_gpu_3"
-local GPU_MODE = 64
-local REFRESH_SECONDS = 0.12
+-- === Configuration / defaults ===
+local CONFIG_FILE = "fusion_config.lua"
 
+local DEFAULTS = {
+  ui = {
+    startPage = "OVERVIEW",
+  },
+  devices = {
+    modem = "back",
+    gpu = "tm_gpu_3",
+    logic = "fusionReactorLogicAdapter_0",
+    induction = "inductionPort_1",
+    laserAmplifier = "laserAmplifier_1",
+    laser = "laser_0",
+    fusionController = "mekanismgenerators:fusion_reactor_controller_3",
+    readers = {
+      deuterium = "block_reader_1",
+      tritium = "block_reader_2",
+      active = "block_reader_7",
+      dtFuel = "block_reader_9",
+    },
+    relays = {
+      laserCharge = "redstone_relay_0",
+      deuteriumTank = "redstone_relay_1",
+      tritiumTank = "redstone_relay_2",
+      aux = "redstone_relay_3",
+    },
+  },
+  control = {
+    telemetryPollMs = 500,
+    laserPulseSeconds = 0.15,
+    relayAnalogStrength = 15,
+    laserModuleCount = 8,
+
+    relaySides = {
+      laserCharge = "",
+      deuteriumTank = "",
+      tritiumTank = "",
+      aux = "",
+    },
+  },
+  runtime = {
+    gpuMode = 64,
+    refreshSeconds = 0.12,
+  },
+}
+
+local function deepCopy(value)
+  if type(value) ~= "table" then
+    return value
+  end
+
+  local out = {}
+  for k, v in pairs(value) do
+    out[k] = deepCopy(v)
+  end
+  return out
+end
+
+local function nonEmptyString(value)
+  if type(value) ~= "string" then
+    return nil
+  end
+
+  if string.find(value, "%S") then
+    return value
+  end
+
+  return nil
+end
+
+local function resolveConfiguredGpuName(configuredName)
+  return nonEmptyString(configuredName) or DEFAULTS.devices.gpu
+end
+
+local GPU_MODE = DEFAULTS.runtime.gpuMode
+local REFRESH_SECONDS = DEFAULTS.runtime.refreshSeconds
+
+-- === Assets ===
 local ASSET_REACTOR_VARIANTS = {
   { name = "trim_micro",  path = "assets/reactor_top_trim_micro.png"  },
   { name = "trim_tiny",   path = "assets/reactor_top_trim_tiny.png"   },
@@ -29,49 +104,12 @@ local ASSET_LASER_MODULE_VARIANTS = {
   { name = "large",   path = "assets/laser_module_large.png"   },
 }
 
-local DEVICES = {
-  modem = "back",
-  gpu = GPU_NAME,
-  logic = "fusionReactorLogicAdapter_0",
-  induction = "inductionPort_1",
-  laserAmplifier = "laserAmplifier_1",
-  laser = "laser_0",
-  fusionController = "mekanismgenerators:fusion_reactor_controller_3",
+-- === Runtime config ===
+local DEVICES = deepCopy(DEFAULTS.devices)
+local CONTROL = deepCopy(DEFAULTS.control)
+local START_PAGE = DEFAULTS.ui.startPage
 
-  readers = {
-    deuterium = "block_reader_1",
-    tritium = "block_reader_2",
-    active = "block_reader_7",
-    dtFuel = "block_reader_9",
-  },
-
-  relays = {
-    laserCharge = "redstone_relay_0",
-    deuteriumTank = "redstone_relay_1",
-    tritiumTank = "redstone_relay_2",
-    aux = "redstone_relay_3",
-  },
-}
-
-local CONTROL = {
-  telemetryPollMs = 500,
-  laserPulseSeconds = 0.15,
-  relayAnalogStrength = 15,
-  laserModuleCount = 8,
-
-  -- Renseigne les sides reels quand tu les connaitras.
-  -- Exemples valides: "top", "bottom", "left", "right", "front", "back"
-  relaySides = {
-    laserCharge = nil,
-    deuteriumTank = nil,
-    tritiumTank = nil,
-    aux = nil,
-  },
-}
-
-local CONFIG_FILE = "fusion_config.lua"
-local START_PAGE = "OVERVIEW"
-
+-- === External config loader ===
 local function loadExternalConfig()
   if not fs.exists(CONFIG_FILE) then
     return
@@ -108,7 +146,12 @@ local function loadExternalConfig()
 
   if type(cfg.devices) == "table" then
     for k, v in pairs(cfg.devices) do
-      if type(v) == "string" and DEVICES[k] ~= nil then
+      if k == "gpu" and DEVICES.gpu ~= nil then
+        local gpuName = nonEmptyString(v)
+        if gpuName then
+          DEVICES.gpu = gpuName
+        end
+      elseif type(v) == "string" and DEVICES[k] ~= nil then
         DEVICES[k] = v
       end
     end
@@ -131,7 +174,26 @@ end
 
 loadExternalConfig()
 
-local gpu = assert(peripheral.wrap(GPU_NAME), "GPU introuvable: " .. GPU_NAME)
+local function initGpuFromConfig()
+  local configuredGpuName = resolveConfiguredGpuName(DEVICES.gpu)
+  local wrapped = peripheral.wrap(configuredGpuName)
+  if wrapped then
+    return wrapped, configuredGpuName
+  end
+
+  local fallbackGpuName = DEFAULTS.devices.gpu
+  if configuredGpuName ~= fallbackGpuName then
+    wrapped = peripheral.wrap(fallbackGpuName)
+    if wrapped then
+      return wrapped, fallbackGpuName
+    end
+  end
+
+  error("GPU introuvable: " .. tostring(configuredGpuName))
+end
+
+local gpu, ACTIVE_GPU_NAME = initGpuFromConfig()
+DEVICES.gpu = ACTIVE_GPU_NAME
 
 local C = {
   bg        = 0xFF0D0F12,
@@ -941,7 +1003,7 @@ local function splitHorizontal(r, leftRatio, gap)
   }
 end
 
-
+-- === Devices / telemetry ===
 local wrappedCache = {}
 local modem = nil
 
@@ -1488,6 +1550,7 @@ local function relaySideConfigured(key)
   return nil
 end
 
+-- === Actions (device controls) ===
 local function setRelayState(key, enabled)
   local relayName = DEVICES.relays[key]
   local side = relaySideConfigured(key)
@@ -1587,6 +1650,7 @@ local function getDataSummary(data)
   return "offline"
 end
 
+-- === Rendering ===
 local function drawHeader(r, data)
   drawPanel(r.x, r.y, r.w, r.h, nil)
   drawTextCenter(r.x, r.y + sv(10), r.w, data.unitName, C.text, ui.headerTitleSize)
@@ -1899,7 +1963,7 @@ local function drawControlPage(r, data)
 
   drawButton("START", x1, y1, bw, bh, "[START]", "green", true)
   drawButton("STOP", x2, y1, bw, bh, "[STOP]", "red", true)
-  drawButton("AUTO", x1, y2, bw, bh, state.auto and "[AUTO ON]" or "[AUTO OFF]", "orange", true)
+  drawButton("AUTO", x1, y2, bw, bh, state.auto and "[AUTO UI ON]" or "[AUTO UI OFF]", "orange", true)
   drawButton("SCRAM", x2, y2, bw, bh, "[SCRAM]", "red", true)
   drawButton("FIRE_LASER", x1, y3, bw, bh, "[FIRE LASER]", "cyan", true)
   drawButton("FILL_HOHLRAUM", x2, y3, bw, bh, "[HOHLRAUM]", "purple", true)
@@ -1915,7 +1979,7 @@ local function drawControlPage(r, data)
   local rw = right.w - ui.pad * 2
   local rowY = right.y + sv(54)
 
-  drawToggleRow(right, rowY, "IGNITION PROFILE", "P" .. tostring(state.ignitionProfile), C.yellow)
+  drawToggleRow(right, rowY, "IGNITION PROFILE (UI)", "P" .. tostring(state.ignitionProfile), C.yellow)
   drawToggleRow(right, rowY + sv(18), "MANUAL FUEL", state.manualFuel and "OPEN" or "CLOSED", state.manualFuel and C.orange or C.muted)
   drawToggleRow(right, rowY + sv(36), "MAINTENANCE", state.maintenance and "ON" or "OFF", state.maintenance and C.orange or C.muted)
   drawToggleRow(right, rowY + sv(54), "LASER RELAY", relaySideConfigured("laserCharge") or "UNSET", relaySideConfigured("laserCharge") and C.green or C.orange)
@@ -1928,8 +1992,8 @@ local function drawControlPage(r, data)
   local bx1 = rx
   local bx2 = rx + bw2 + gap
 
-  drawButton("PROFILE_PREV", bx1, by1, bw2, bh, "[PROFILE -]", "purple", true)
-  drawButton("PROFILE_NEXT", bx2, by1, bw2, bh, "[PROFILE +]", "purple", true)
+  drawButton("PROFILE_PREV", bx1, by1, bw2, bh, "[PROFILE UI -]", "purple", true)
+  drawButton("PROFILE_NEXT", bx2, by1, bw2, bh, "[PROFILE UI +]", "purple", true)
   drawButton("MANUAL_FUEL", bx1, by1 + bh + sv(12), bw2, bh, state.manualFuel and "[FUEL CLOSE]" or "[FUEL OPEN]", "orange", true)
   drawButton("MAINTENANCE", bx2, by1 + bh + sv(12), bw2, bh, state.maintenance and "[MAINT OFF]" or "[MAINT ON]", "orange", true)
 end
@@ -1966,8 +2030,8 @@ local function drawFuelPage(r, data)
 
   drawButton("MANUAL_FUEL", x1, y1, bw, bh, state.manualFuel and "[FUEL CLOSE]" or "[FUEL OPEN]", "orange", true)
   drawButton("FILL_HOHLRAUM", x2, y1, bw, bh, "[LOAD HOHLRAUM]", "purple", true)
-  drawButton("PROFILE_PREV", x1, y2, bw, bh, "[PROFILE -]", "purple", true)
-  drawButton("PROFILE_NEXT", x2, y2, bw, bh, "[PROFILE +]", "purple", true)
+  drawButton("PROFILE_PREV", x1, y2, bw, bh, "[PROFILE UI -]", "purple", true)
+  drawButton("PROFILE_NEXT", x2, y2, bw, bh, "[PROFILE UI +]", "purple", true)
 end
 
 local function drawSystemPage(r, data)
@@ -1980,7 +2044,7 @@ local function drawSystemPage(r, data)
 
   drawPanel(left.x, left.y, left.w, left.h, "SYSTEM INFO")
   local rowY = left.y + sv(54)
-  drawToggleRow(left, rowY, "GPU", GPU_NAME, C.cyan)
+  drawToggleRow(left, rowY, "GPU", ACTIVE_GPU_NAME, C.cyan)
   drawToggleRow(left, rowY + sv(18), "SCREEN", tostring(ui.sw) .. "x" .. tostring(ui.sh), C.text)
   drawToggleRow(left, rowY + sv(36), "MODE", tostring(GPU_MODE), C.text)
   drawToggleRow(left, rowY + sv(54), "LOGIC", data.logicPresent and "ONLINE" or "OFFLINE", data.logicPresent and C.green or C.red)
@@ -2034,8 +2098,9 @@ local function handleAction(action)
   state.lastAction = action
 
   if action == "AUTO" then
+    -- UI-only toggle: kept for operator workflows, not bound to reactor logic.
     state.auto = not state.auto
-    state.message = state.auto and "ui auto enabled" or "ui auto disabled"
+    state.message = state.auto and "ui-state only: auto flag enabled" or "ui-state only: auto flag disabled"
 
   elseif action == "START" then
     local okFuel, msgFuel = openFuelFeed(true)
@@ -2081,12 +2146,13 @@ local function handleAction(action)
     state.message = state.maintenance and "maintenance enabled" or "maintenance disabled"
 
   elseif action == "PROFILE_PREV" then
+    -- UI-only selector: reserved for future ignition profile bindings.
     state.ignitionProfile = clamp(state.ignitionProfile - 1, 1, 5)
-    state.message = "profile p" .. tostring(state.ignitionProfile)
+    state.message = "ui-state only: profile p" .. tostring(state.ignitionProfile)
 
   elseif action == "PROFILE_NEXT" then
     state.ignitionProfile = clamp(state.ignitionProfile + 1, 1, 5)
-    state.message = "profile p" .. tostring(state.ignitionProfile)
+    state.message = "ui-state only: profile p" .. tostring(state.ignitionProfile)
 
   elseif action == "RELOAD_ASSETS" then
     tryLoadAssets()

@@ -1,0 +1,32 @@
+{
+  "name": "Fusion-Tom-manage",
+  "version": "1.1.0",
+  "entrypoint": "start_menu_pages_live_v7.lua",
+  "installer": "install.lua",
+  "config": "fusion_config.lua",
+  "scripts": [
+    "start_menu_pages_live_v7.lua",
+    "install.lua",
+    "fusion_config.lua",
+    "gpu_debug.lua",
+    "tp_mek_scan.lua"
+  ],
+  "assets": [
+    "assets/laser_module_large.png",
+    "assets/laser_module_medium.png",
+    "assets/laser_module_micro.png",
+    "assets/laser_module_small.png",
+    "assets/laser_module_small2.png",
+    "assets/laser_module_tiny.png",
+    "assets/laser_module_xsmall.png",
+    "assets/module laser.png",
+    "assets/reactor_top.png",
+    "assets/reactor_top_trim_large.png",
+    "assets/reactor_top_trim_medium.png",
+    "assets/reactor_top_trim_micro.png",
+    "assets/reactor_top_trim_small.png",
+    "assets/reactor_top_trim_small2.png",
+    "assets/reactor_top_trim_tiny.png",
+    "assets/reactor_top_trim_xsmall.png"
+  ]
+}
