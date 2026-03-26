@@ -1,6 +1,6 @@
 {
     "name":  "Fusion-Tom-manage",
-    "version":  "1.2.8",
+    "version":  "1.2.9",
     "channel":  "stable",
     "entrypoint":  "start_menu_pages_live_v7.lua",
     "source":  {
@@ -8,7 +8,7 @@
                    "repo":  "Fusion-Tom-manage",
                    "branch":  "main",
                    "manifestPath":  "fusion.manifest.json",
-                   "commit":  "8397a2b6c9dd4dafec896dbe2dd4fa2a3fa93b77"
+                   "commit":  "ddbea8d8b7409e21e8de264110494e6a304f43e9"
                },
     "integrity":  {
                       "mode":  "hash+size",
@@ -22,8 +22,8 @@
     "files":  [
                   {
                       "path":  "start_menu_pages_live_v7.lua",
-                      "size":  95865,
-                      "hash":  "750a7488277da08f831db5061970142d2c82411a1049d240bbee83a229a5d9bf",
+                      "size":  85069,
+                      "hash":  "9285d04631db6e95269f51c52dac2589a2ad8d3c82d066b4dffbff9487c10572",
                       "hashAlgo":  "sha256"
                   },
                   {
@@ -41,7 +41,7 @@
                   {
                       "path":  "fusion.version",
                       "size":  6,
-                      "hash":  "d2d31534641da01801512a3ec793bc8d57132d4cefa19a5fb503e8995f39eb8f",
+                      "hash":  "c8d83c2672c5e397ce16a2ee275ac45917002b9b36765f77d99f31bdf81ee828",
                       "hashAlgo":  "sha256"
                   },
                   {
@@ -217,7 +217,13 @@
                       "size":  6583,
                       "hash":  "4665cf19a6dfd880dbab709c3872d645806d11ded28f1f164b7cccb69ee8aa3d",
                       "hashAlgo":  "sha256"
+                  },
+                  {
+                      "path":  "ui/pages/overview_graphics.lua",
+                      "size":  12066,
+                      "hash":  "bae59b979d08353d0febd9e014762d9aeb2dcda11b82406a224b39fa311b3a91",
+                      "hashAlgo":  "sha256"
                   }
               ],
-    "commit":  "8397a2b6c9dd4dafec896dbe2dd4fa2a3fa93b77"
+    "commit":  "ddbea8d8b7409e21e8de264110494e6a304f43e9"
 }
