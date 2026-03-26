@@ -1,4 +1,5 @@
 local M = {}
+local UpdateHash = assert(dofile("core/update/hash.lua"))
 
 local function normalizePath(path)
   path = tostring(path or "")
@@ -28,6 +29,29 @@ local function nonEmpty(value)
     return value
   end
   return nil
+end
+
+local function normalizeHash(value)
+  if type(value) ~= "string" then
+    return nil
+  end
+  value = string.gsub(value, "^%s+", "")
+  value = string.gsub(value, "%s+$", "")
+  value = string.lower(value)
+  if value == "" then
+    return nil
+  end
+  return value
+end
+
+local function resolveHashAlgo(source, entry)
+  if type(entry) == "table" and type(entry.hashAlgo) == "string" and entry.hashAlgo ~= "" then
+    return string.lower(entry.hashAlgo)
+  end
+  if type(source) == "table" and type(source.defaultHashAlgo) == "string" and source.defaultHashAlgo ~= "" then
+    return string.lower(source.defaultHashAlgo)
+  end
+  return "sha256"
 end
 
 local function resolveSourceRef(source)
@@ -213,11 +237,39 @@ function M.downloadFiles(source, fileEntries, targetDir, logger)
       return nil, mismatch
     end
 
+    local expectedHash = normalizeHash(type(entry) == "table" and entry.hash or nil)
+    if expectedHash then
+      local hashAlgo = resolveHashAlgo(source, entry)
+      if not UpdateHash.isSupportedAlgo(hashAlgo) then
+        return nil, "unsupported hash algorithm for " .. tostring(normalizedPath) .. ": algo=" .. tostring(hashAlgo)
+      end
+
+      local actualHash, hashErr = UpdateHash.hashFile(destination, hashAlgo)
+      if not actualHash then
+        return nil, "hash compute failed for " .. tostring(normalizedPath) .. ": " .. tostring(hashErr)
+      end
+
+      if logger then
+        logger("HASH download validation path=" .. tostring(normalizedPath) .. " algo=" .. tostring(hashAlgo) .. " expected=" .. tostring(expectedHash) .. " actual=" .. tostring(actualHash))
+      end
+
+      if actualHash ~= expectedHash then
+        return nil, "hash mismatch for " .. tostring(normalizedPath)
+          .. ": expected=" .. tostring(expectedHash)
+          .. ", received=" .. tostring(actualHash)
+          .. ", algo=" .. tostring(hashAlgo)
+          .. ", url=" .. tostring(downloaded.url)
+      end
+
+      downloaded.hash = actualHash
+      downloaded.hashAlgo = hashAlgo
+    end
+
     out[#out + 1] = downloaded
     if logger then
       logger("downloaded " .. tostring(downloaded.path) .. " (" .. tostring(downloaded.size) .. " bytes) from " .. tostring(downloaded.url))
-      if downloaded.hash then
-        logger("integrity hint present for " .. tostring(downloaded.path) .. " (" .. tostring(downloaded.hashAlgo or "hash") .. ", verification pending implementation)")
+      if downloaded.hash and downloaded.hashAlgo then
+        logger("HASH download ok path=" .. tostring(downloaded.path) .. " algo=" .. tostring(downloaded.hashAlgo) .. " hash=" .. tostring(downloaded.hash))
       end
     end
   end

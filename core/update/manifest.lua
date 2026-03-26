@@ -23,7 +23,35 @@ local function normalizeHash(value)
   if not hasValue(value) then
     return nil
   end
-  return string.lower(tostring(value))
+  local hash = string.lower(trim(value))
+  if hash == "" then
+    return nil
+  end
+  return hash
+end
+
+local function normalizeHashAlgo(value)
+  if not hasValue(value) then
+    return nil
+  end
+  return string.lower(trim(value))
+end
+
+local function isSupportedHashAlgo(algo)
+  return normalizeHashAlgo(algo) == "sha256"
+end
+
+local function isValidHash(hash, algo)
+  if type(hash) ~= "string" then
+    return false
+  end
+
+  local normalizedAlgo = normalizeHashAlgo(algo) or "sha256"
+  if normalizedAlgo == "sha256" then
+    return #hash == 64 and string.match(hash, "^[0-9a-f]+$") ~= nil
+  end
+
+  return false
 end
 
 local function normalizeCommit(value)
@@ -64,11 +92,18 @@ local function normalizeFiles(list)
       }
     elseif type(entry) == "table" then
       local hash = normalizeHash(entry.hash or entry.sha256)
+      local hashAlgo = hash and (normalizeHashAlgo(entry.hashAlgo) or "sha256") or nil
+      if hash and not isSupportedHashAlgo(hashAlgo) then
+        return nil, "unsupported hash algorithm at index " .. tostring(i) .. ": " .. tostring(hashAlgo)
+      end
+      if hash and not isValidHash(hash, hashAlgo) then
+        return nil, "invalid hash format at index " .. tostring(i) .. ": " .. tostring(hash)
+      end
       item = {
         path = normalizePath(entry.path),
         size = tonumber(entry.size) and math.max(0, math.floor(tonumber(entry.size))) or nil,
         hash = hash,
-        hashAlgo = hash and (hasValue(entry.hashAlgo) and tostring(entry.hashAlgo) or "sha256") or nil,
+        hashAlgo = hashAlgo,
       }
     else
       return nil, "invalid file entry at index " .. tostring(i)
@@ -150,12 +185,22 @@ function M.validate(raw)
 
   local integrity = {}
   if type(raw.integrity) == "table" then
-    integrity.mode = hasValue(raw.integrity.mode) and tostring(raw.integrity.mode) or "size"
+    local defaultHashAlgo = normalizeHashAlgo(raw.integrity.defaultHashAlgo) or "sha256"
+    if not isSupportedHashAlgo(defaultHashAlgo) then
+      return nil, "manifest integrity default hash algorithm unsupported: " .. tostring(defaultHashAlgo)
+    end
+
+    integrity.mode = hasValue(raw.integrity.mode) and tostring(raw.integrity.mode) or "hash+size"
     integrity.hashPlanned = raw.integrity.hashPlanned == true
-    integrity.hashAlgorithms = type(raw.integrity.hashAlgorithms) == "table" and raw.integrity.hashAlgorithms or nil
+    integrity.hashRequired = raw.integrity.hashRequired ~= false
+    integrity.defaultHashAlgo = defaultHashAlgo
+    integrity.hashAlgorithms = type(raw.integrity.hashAlgorithms) == "table" and raw.integrity.hashAlgorithms or { "sha256" }
   else
-    integrity.mode = "size"
+    integrity.mode = "hash+size"
     integrity.hashPlanned = false
+    integrity.hashRequired = true
+    integrity.defaultHashAlgo = "sha256"
+    integrity.hashAlgorithms = { "sha256" }
   end
 
   return {
@@ -279,6 +324,40 @@ function M.validateDownloadManifest(manifest)
   local commit = M.resolveCommit(manifest)
   if not M.isValidCommit(commit) then
     return false, "manifest commit missing or invalid (expected 40-hex sha)"
+  end
+
+  local defaultAlgo = "sha256"
+  if type(manifest.integrity) == "table" and hasValue(manifest.integrity.defaultHashAlgo) then
+    defaultAlgo = normalizeHashAlgo(manifest.integrity.defaultHashAlgo) or "sha256"
+  end
+  if not isSupportedHashAlgo(defaultAlgo) then
+    return false, "manifest integrity default hash algorithm unsupported: " .. tostring(defaultAlgo)
+  end
+
+  for i, entry in ipairs(manifest.files) do
+    local path = normalizePath(entry.path)
+    if path == "" then
+      return false, "manifest file path invalid at index " .. tostring(i)
+    end
+    if type(entry.size) ~= "number" or entry.size < 0 then
+      return false, "manifest size missing for " .. tostring(path)
+    end
+
+    local hash = normalizeHash(entry.hash)
+    if not hash then
+      return false, "manifest hash missing for " .. tostring(path)
+    end
+
+    local hashAlgo = normalizeHashAlgo(entry.hashAlgo) or defaultAlgo
+    if not isSupportedHashAlgo(hashAlgo) then
+      return false, "manifest hash algorithm unsupported for " .. tostring(path) .. ": " .. tostring(hashAlgo)
+    end
+    if not isValidHash(hash, hashAlgo) then
+      return false, "manifest hash format invalid for " .. tostring(path) .. ": " .. tostring(hash)
+    end
+
+    entry.hash = hash
+    entry.hashAlgo = hashAlgo
   end
 
   return true, commit

@@ -1,5 +1,6 @@
 local M = {}
 local STAGING_META_NAME = "staging_meta.lua"
+local UpdateHash = assert(dofile("core/update/hash.lua"))
 
 local function normalizePath(path)
   path = tostring(path or "")
@@ -113,6 +114,26 @@ local function mapByPath(list)
   return map
 end
 
+local function normalizeHash(value)
+  if type(value) ~= "string" then
+    return nil
+  end
+  value = string.gsub(value, "^%s+", "")
+  value = string.gsub(value, "%s+$", "")
+  value = string.lower(value)
+  if value == "" then
+    return nil
+  end
+  return value
+end
+
+local function resolveHashAlgo(entry)
+  if type(entry) == "table" and type(entry.hashAlgo) == "string" and entry.hashAlgo ~= "" then
+    return string.lower(entry.hashAlgo)
+  end
+  return "sha256"
+end
+
 function M.clearPath(path)
   return deleteTree(path)
 end
@@ -136,8 +157,8 @@ function M.markStagingReady(fileEntries, stagingDir, context)
       files[#files + 1] = {
         path = path,
         size = type(entry.size) == "number" and math.max(0, math.floor(entry.size)) or nil,
-        hash = type(entry.hash) == "string" and entry.hash or nil,
-        hashAlgo = type(entry.hashAlgo) == "string" and entry.hashAlgo or nil,
+        hash = normalizeHash(entry.hash),
+        hashAlgo = type(entry.hashAlgo) == "string" and string.lower(entry.hashAlgo) or nil,
       }
     end
   end
@@ -153,7 +174,9 @@ function M.markStagingReady(fileEntries, stagingDir, context)
   return M.writeStagingMeta(stagingDir, meta)
 end
 
-function M.validateStaging(fileEntries, stagingDir, expectedContext)
+function M.validateStaging(fileEntries, stagingDir, expectedContext, logger, phase)
+  local phaseName = type(phase) == "string" and phase or "staging validation"
+
   if type(stagingDir) ~= "string" or stagingDir == "" then
     return false, "invalid staging directory"
   end
@@ -220,6 +243,40 @@ function M.validateStaging(fileEntries, stagingDir, expectedContext)
     if type(stagedMeta.size) == "number" and stagedMeta.size >= 0 and type(entry.size) == "number" and entry.size >= 0 and stagedMeta.size ~= entry.size then
       return false, "staging meta size mismatch for " .. tostring(path)
     end
+
+    local expectedHash = normalizeHash(entry.hash)
+    if expectedHash then
+      local hashAlgo = resolveHashAlgo(entry)
+      if not UpdateHash.isSupportedAlgo(hashAlgo) then
+        return false, "unsupported hash algorithm in staging for " .. tostring(path) .. ": algo=" .. tostring(hashAlgo)
+      end
+
+      local actualHash, hashErr = UpdateHash.hashFile(stagedPath, hashAlgo)
+      if not actualHash then
+        return false, "hash compute failed in staging for " .. tostring(path) .. ": " .. tostring(hashErr)
+      end
+
+      if logger then
+        logger("HASH " .. tostring(phaseName) .. " path=" .. tostring(path) .. " algo=" .. tostring(hashAlgo) .. " expected=" .. tostring(expectedHash) .. " actual=" .. tostring(actualHash))
+      end
+
+      if actualHash ~= expectedHash then
+        return false, "hash mismatch in staging for " .. tostring(path)
+          .. ": expected=" .. tostring(expectedHash)
+          .. ", received=" .. tostring(actualHash)
+          .. ", algo=" .. tostring(hashAlgo)
+      end
+
+      local stagedMetaHash = normalizeHash(stagedMeta.hash)
+      if stagedMetaHash ~= expectedHash then
+        return false, "staging meta hash mismatch for " .. tostring(path)
+      end
+
+      local stagedMetaAlgo = resolveHashAlgo(stagedMeta)
+      if stagedMetaAlgo ~= hashAlgo then
+        return false, "staging meta hash algorithm mismatch for " .. tostring(path)
+      end
+    end
   end
 
   return true
@@ -276,7 +333,7 @@ function M.createBackup(fileEntries, backupDir, context, logger)
 end
 
 function M.applyFromStaging(fileEntries, stagingDir, logger)
-  local valid, validErr = M.validateStaging(fileEntries, stagingDir)
+  local valid, validErr = M.validateStaging(fileEntries, stagingDir, nil, logger, "apply validation")
   if not valid then
     return false, validErr
   end

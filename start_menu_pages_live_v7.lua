@@ -140,6 +140,13 @@ local UPDATE_STATUS = {
   ROLLBACK_FAILED = "ROLLBACK FAILED",
 }
 
+local INTEGRITY_STATUS = {
+  PENDING = "INTEGRITY PENDING",
+  OK = "INTEGRITY OK",
+  HASH_FAILED = "HASH CHECK FAILED",
+  STAGING_INVALID = "STAGING INVALID",
+}
+
 local UpdateVersion = assert(dofile("core/update/version.lua"))
 local UpdateManifest = assert(dofile("core/update/manifest.lua"))
 local UpdateClient = assert(dofile("core/update/client.lua"))
@@ -310,6 +317,8 @@ local state = {
     lastApply = "never",
     lastDownload = "never",
     lastError = "none",
+    integrityStatus = INTEGRITY_STATUS.PENDING,
+    integrityDetail = "awaiting validation",
     lastCheckSummary = "not checked",
     logs = {},
     remoteManifest = nil,
@@ -1845,6 +1854,62 @@ local function setDownloadedState(flag, count)
   end
 end
 
+local function integrityStatusColor(status)
+  if status == INTEGRITY_STATUS.OK then
+    return C.green
+  end
+  if status == INTEGRITY_STATUS.HASH_FAILED or status == INTEGRITY_STATUS.STAGING_INVALID then
+    return C.red
+  end
+  return C.orange
+end
+
+local function shortIntegrityStatus(status)
+  if status == INTEGRITY_STATUS.OK then
+    return "INT OK"
+  end
+  if status == INTEGRITY_STATUS.HASH_FAILED then
+    return "INT FAIL"
+  end
+  if status == INTEGRITY_STATUS.STAGING_INVALID then
+    return "STG BAD"
+  end
+  return "INT WAIT"
+end
+
+local function setIntegrityStatus(status, detail, logIt)
+  state.update.integrityStatus = status or INTEGRITY_STATUS.PENDING
+  if type(detail) == "string" and detail ~= "" then
+    state.update.integrityDetail = firstLine(detail)
+  end
+  if logIt then
+    appendUpdateLogLine("INTEGRITY " .. tostring(state.update.integrityStatus) .. " | " .. tostring(state.update.integrityDetail))
+  end
+end
+
+local function setIntegrityFromError(rawErr)
+  local raw = firstLine(rawErr or "")
+  local lower = string.lower(raw)
+
+  if string.find(lower, "hash mismatch", 1, true)
+    or string.find(lower, "hash compute failed", 1, true)
+  then
+    setIntegrityStatus(INTEGRITY_STATUS.HASH_FAILED, raw, true)
+    return
+  end
+
+  if string.find(lower, "staging", 1, true)
+    or string.find(lower, "manifest hash", 1, true)
+    or string.find(lower, "manifest size", 1, true)
+    or string.find(lower, "manifest commit", 1, true)
+    or string.find(lower, "manifest integrity", 1, true)
+    or string.find(lower, "size mismatch in staging", 1, true)
+    or string.find(lower, "unsupported hash algorithm", 1, true)
+  then
+    setIntegrityStatus(INTEGRITY_STATUS.STAGING_INVALID, raw, true)
+  end
+end
+
 local function shortCommit(commit, length)
   local value = type(commit) == "string" and commit or ""
   if value == "" or value == "n/a" then
@@ -1876,6 +1941,14 @@ local function parseSizeMismatchDetail(raw)
   return path, expected, received, url
 end
 
+local function parseHashMismatchDetail(raw)
+  local path = string.match(raw, "hash mismatch[^%w]+for ([^:]+)")
+  local expected = string.match(raw, "expected=([0-9a-fA-F]+)")
+  local received = string.match(raw, "received=([0-9a-fA-F]+)")
+  local algo = string.match(raw, "algo=([%w_%-]+)")
+  return path, expected, received, algo
+end
+
 local function formatUpdateUserError(step, err)
   local raw = firstLine(err or "unknown error")
   local lower = string.lower(raw)
@@ -1901,6 +1974,20 @@ local function formatUpdateUserError(step, err)
   if string.find(lower, "staging", 1, true) then
     return step .. ": staging is invalid or incomplete. Run DOWNLOAD again."
   end
+  if string.find(lower, "hash mismatch", 1, true) then
+    local path, expected, received, algo = parseHashMismatchDetail(raw)
+    if path and expected and received then
+      return step .. ": hash check failed on " .. tostring(path)
+        .. " (" .. tostring(algo or "sha256") .. ", expected " .. tostring(expected) .. ", got " .. tostring(received) .. ")."
+    end
+    return step .. ": hash check failed."
+  end
+  if string.find(lower, "unsupported hash algorithm", 1, true) then
+    return step .. ": unsupported hash algorithm in manifest/source."
+  end
+  if string.find(lower, "hash compute failed", 1, true) then
+    return step .. ": unable to compute local file hash."
+  end
   if string.find(lower, "size mismatch", 1, true) then
     local path, expected, received = parseSizeMismatchDetail(raw)
     if path and expected and received then
@@ -1920,6 +2007,7 @@ local function failUpdateStep(step, status, err)
   local userMessage = formatUpdateUserError(step, err)
   state.update.lastError = userMessage
   state.update.lastCheckSummary = string.lower(step) .. " failed"
+  setIntegrityFromError(err)
   setUpdateStatus(status, userMessage, false)
   appendUpdateLogLine(step .. " failed (raw): " .. tostring(firstLine(err)))
   appendUpdateLogLine(step .. " failed (ui): " .. tostring(userMessage))
@@ -1944,6 +2032,7 @@ local function buildUpdateSource(remoteManifest)
     branch = tostring(UPDATE_CFG.branch or "main"),
     commit = "",
     rawBaseUrl = tostring(UPDATE_CFG.rawBaseUrl or ""),
+    defaultHashAlgo = "sha256",
   }
 
   if type(remoteManifest) == "table" then
@@ -1969,6 +2058,10 @@ local function buildUpdateSource(remoteManifest)
     if source.commit == "" and type(remoteManifest.source.commit) == "string" and remoteManifest.source.commit ~= "" then
       source.commit = remoteManifest.source.commit
     end
+  end
+
+  if type(remoteManifest) == "table" and type(remoteManifest.integrity) == "table" and type(remoteManifest.integrity.defaultHashAlgo) == "string" and remoteManifest.integrity.defaultHashAlgo ~= "" then
+    source.defaultHashAlgo = string.lower(remoteManifest.integrity.defaultHashAlgo)
   end
 
   return source
@@ -2050,6 +2143,7 @@ local function performUpdateCheck(reason)
   state.update.applyConfirmArmed = false
   state.update.lastCheck = nowText()
   setDownloadedState(false, 0)
+  setIntegrityStatus(INTEGRITY_STATUS.PENDING, "manifest validation pending", false)
   state.update.remoteCommit = "n/a"
   state.update.remoteBranch = tostring(UPDATE_CFG.branch or "main")
   state.update.manifestUrl = "n/a"
@@ -2108,6 +2202,15 @@ local function performUpdateCheck(reason)
   state.update.filesToUpdate = #state.update.pendingFiles
   state.update.lastError = manifestReady and "none" or formatUpdateUserError("CHECK", manifestCommitOrErr)
   setDownloadedState(false, 0)
+  if manifestReady then
+    if state.update.filesToUpdate > 0 then
+      setIntegrityStatus(INTEGRITY_STATUS.PENDING, "manifest hash/size valid; download validation pending", true)
+    else
+      setIntegrityStatus(INTEGRITY_STATUS.OK, "manifest hash/size valid (up to date)", true)
+    end
+  else
+    setIntegrityStatus(INTEGRITY_STATUS.STAGING_INVALID, firstLine(manifestCommitOrErr), true)
+  end
 
   local newer, cmpErr = UpdateVersion.isRemoteNewer(state.update.localVersion, state.update.remoteVersion)
   local status = UPDATE_STATUS.UP_TO_DATE
@@ -2147,6 +2250,7 @@ end
 
 local function performUpdateDownload()
   state.update.applyConfirmArmed = false
+  setIntegrityStatus(INTEGRITY_STATUS.PENDING, "download + hash validation in progress", true)
   setUpdateStatus(UPDATE_STATUS.DOWNLOADING, "preparing staging directory", true)
   appendUpdateLogLine("DOWNLOAD start")
 
@@ -2211,13 +2315,14 @@ local function performUpdateDownload()
     return failUpdateStep("DOWNLOAD", UPDATE_STATUS.DOWNLOAD_FAILED, markedErr)
   end
 
-  local valid, validErr = UpdateApply.validateStaging(remoteManifest.files, UPDATE_TEMP_DIR, stagingContext)
+  local valid, validErr = UpdateApply.validateStaging(remoteManifest.files, UPDATE_TEMP_DIR, stagingContext, appendUpdateLogLine, "download validation")
   if not valid then
     clearStagingWithLog("staging validation failure")
     setDownloadedState(false, 0)
     return failUpdateStep("DOWNLOAD", UPDATE_STATUS.DOWNLOAD_FAILED, validErr)
   end
 
+  setIntegrityStatus(INTEGRITY_STATUS.OK, "staging integrity validated for commit " .. tostring(shortCommit(manifestCommit, 8)), true)
   setDownloadedState(true, #downloaded)
   state.update.lastDownload = nowText()
   state.update.lastError = "none"
@@ -2237,6 +2342,7 @@ local function performUpdateApply()
   end
 
   state.update.applyConfirmArmed = false
+  setIntegrityStatus(INTEGRITY_STATUS.PENDING, "pre-apply integrity validation in progress", true)
   setUpdateStatus(UPDATE_STATUS.APPLYING, "validating staging and applying update", true)
   appendUpdateLogLine("APPLY start")
 
@@ -2255,12 +2361,13 @@ local function performUpdateApply()
     remoteCommit = tostring(state.update.remoteCommit or ""),
   }
 
-  local stageOk, stageErr = UpdateApply.validateStaging(remoteManifest.files, UPDATE_TEMP_DIR, expectedContext)
+  local stageOk, stageErr = UpdateApply.validateStaging(remoteManifest.files, UPDATE_TEMP_DIR, expectedContext, appendUpdateLogLine, "pre-apply validation")
   if not stageOk then
     clearStagingWithLog("apply refused invalid staging")
     setDownloadedState(false, 0)
     return failUpdateStep("APPLY", UPDATE_STATUS.APPLY_FAILED, stageErr)
   end
+  setIntegrityStatus(INTEGRITY_STATUS.OK, "pre-apply staging integrity validated", true)
 
   local context = {
     previousVersion = state.update.localVersion,
@@ -2275,6 +2382,7 @@ local function performUpdateApply()
 
   local applied, applyErr = UpdateApply.applyFromStaging(remoteManifest.files, UPDATE_TEMP_DIR, appendUpdateLogLine)
   if not applied then
+    setIntegrityFromError(applyErr)
     setUpdateStatus(UPDATE_STATUS.APPLY_FAILED, "apply failed, rollback attempt started", true)
     local rolledBack, rollbackErr = UpdateApply.rollback(UPDATE_BACKUP_DIR, appendUpdateLogLine)
     if rolledBack then
@@ -2311,6 +2419,7 @@ local function performUpdateApply()
   state.update.lastError = "none"
   state.update.lastCheckSummary = "up to date"
   refreshLocalUpdateSnapshot()
+  setIntegrityStatus(INTEGRITY_STATUS.OK, "applied with validated staging integrity", true)
   setUpdateStatus(UPDATE_STATUS.UP_TO_DATE, "apply completed successfully", true)
   appendUpdateLogLine("APPLY success: local version=" .. tostring(state.update.localVersion) .. ", commit=" .. tostring(state.update.remoteCommit))
 
@@ -2333,6 +2442,7 @@ local function performUpdateRollback()
   state.update.lastError = "none"
   state.update.lastCheckSummary = "rollback done"
   refreshLocalUpdateSnapshot()
+  setIntegrityStatus(INTEGRITY_STATUS.PENDING, "rollback restored backup; run CHECK", true)
   setUpdateStatus(UPDATE_STATUS.ROLLBACK_DONE, "backup restored", true)
   appendUpdateLogLine("ROLLBACK success: local version=" .. tostring(state.update.localVersion))
 
@@ -2502,6 +2612,10 @@ local function drawMicroMajPage(r, data)
   drawText(infoRect.x + 1, rowY, "FL", C.text, 1)
   drawTextRight(infoRect.x + infoRect.w - 1, rowY, tostring(state.update.filesToUpdate), state.update.filesToUpdate > 0 and C.orange or C.green, 1)
 
+  rowY = rowY + 9
+  drawText(infoRect.x + 1, rowY, "IN", C.text, 1)
+  drawTextRight(infoRect.x + infoRect.w - 1, rowY, shortIntegrityStatus(state.update.integrityStatus), integrityStatusColor(state.update.integrityStatus), 1)
+
   local pad = 1
   local gap = math.max(1, math.floor(ui.smallPad * 0.6))
   local bw = math.floor((actionsRect.w - gap) / 2)
@@ -2536,6 +2650,8 @@ local function drawUpdatePage(r)
   local statusRows = {
     { label = "STATUS", value = state.update.remoteStatus, color = updateStatusColor(state.update.remoteStatus) },
     { label = "DETAIL", value = state.update.statusDetail ~= "" and state.update.statusDetail or "-", color = C.muted },
+    { label = "INTEGRITY", value = state.update.integrityStatus, color = integrityStatusColor(state.update.integrityStatus) },
+    { label = "INTEGRITY DETAIL", value = state.update.integrityDetail ~= "" and state.update.integrityDetail or "-", color = state.update.integrityStatus == INTEGRITY_STATUS.OK and C.muted or integrityStatusColor(state.update.integrityStatus) },
     { label = "LOCAL VERSION", value = state.update.localVersion, color = C.cyan },
     { label = "REMOTE VERSION", value = state.update.remoteVersion, color = C.yellow },
     { label = "CHANNEL", value = state.update.channel, color = C.text },
@@ -2569,7 +2685,13 @@ local function drawUpdatePage(r)
     for i = startIndex, totalLines do
       local line = state.update.logs[i]
       local low = string.lower(line)
-      local color = (string.find(low, "failed", 1, true) or string.find(low, "error", 1, true)) and C.red or C.text
+      local hasError = string.find(low, "failed", 1, true)
+        or string.find(low, "error", 1, true)
+        or string.find(low, "mismatch", 1, true)
+        or string.find(low, "invalid", 1, true)
+      local hasWarn = string.find(low, "warning", 1, true)
+      local hasHash = string.find(low, "hash ", 1, true)
+      local color = hasError and C.red or (hasWarn and C.orange or (hasHash and C.cyan or C.text))
       drawText(logRect.x + ui.pad, logY + step * lineIndex, firstLine(line), color, 1)
       lineIndex = lineIndex + 1
     end

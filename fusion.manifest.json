@@ -1,6 +1,6 @@
 {
     "name":  "Fusion-Tom-manage",
-    "version":  "1.2.4",
+    "version":  "1.2.5",
     "channel":  "stable",
     "entrypoint":  "start_menu_pages_live_v7.lua",
     "source":  {
@@ -8,11 +8,13 @@
                    "repo":  "Fusion-Tom-manage",
                    "branch":  "main",
                    "manifestPath":  "fusion.manifest.json",
-                   "commit":  "e43755ad6348532a0c55eeb810e4d5bc20ca8a4b"
+                   "commit":  "de0629e67489231d1e0b06ad1edd14c03def6f63"
                },
     "integrity":  {
-                      "mode":  "size",
-                      "hashPlanned":  true,
+                      "mode":  "hash+size",
+                      "hashPlanned":  false,
+                      "hashRequired":  true,
+                      "defaultHashAlgo":  "sha256",
                       "hashAlgorithms":  [
                                              "sha256"
                                          ]
@@ -20,107 +22,160 @@
     "files":  [
                   {
                       "path":  "start_menu_pages_live_v7.lua",
-                      "size":  105320
+                      "size":  110789,
+                      "hash":  "d7168b235b95c32c1ea8d58f47d4813cb2cae1ba7629a48e8c3c5e0cb2527a45",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "install.lua",
-                      "size":  9384
+                      "size":  9384,
+                      "hash":  "bc5329a3a49f1adbb65e1cbcd4da3a916b12b52b697270a968891abd0940b45a",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "fusion_config.lua",
-                      "size":  1160
+                      "size":  1160,
+                      "hash":  "e2ed439e6a462388154328c6589c84bf6ec0299f9ddfdf3f6658e85ee270e2aa",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "fusion.version",
-                      "size":  6
-                  },
-                  {
-                      "path":  "fusion.manifest.json"
+                      "size":  6,
+                      "hash":  "fe2b7c237b5a6e42818aa3e4f7fc5820f49c32289c32c96260ef89a8c8f6d3d7",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "core/update/version.lua",
-                      "size":  2245
+                      "size":  2245,
+                      "hash":  "75b756cdfe41c10a0ddcb4cf37fea714332c65275596e4a5acd6031f616c008a",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "core/update/manifest.lua",
-                      "size":  7564
+                      "size":  10266,
+                      "hash":  "1c51d0af3fb85e36238086039ca9bf8994f43bd789d9d270fa40b7646fb62e4f",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "core/update/client.lua",
-                      "size":  6595
+                      "size":  8497,
+                      "hash":  "338059b2d3219553d2ea163763d28233a68b29cd02b544542714f46d6baac065",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "core/update/apply.lua",
-                      "size":  9219
+                      "size":  11279,
+                      "hash":  "bd03a2b1d889e5f405988c34219a9d43195d8a41b7dd7a40550f5506d7064482",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "gpu_debug.lua",
-                      "size":  821
+                      "size":  821,
+                      "hash":  "68bae1fe8ac725eb71a118b4a44e25be83c2da9070e6319ab443fd5e3c083bd7",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "tp_mek_scan.lua",
-                      "size":  4199
+                      "size":  4199,
+                      "hash":  "ffff7971a7594049b87cc21cfe3500dfe5118cc0552281cd9fd21873f7ff23d0",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "assets/laser_module_large.png",
-                      "size":  26176
+                      "size":  26176,
+                      "hash":  "1ed2e68b466df46b78f53abbddb67e1f21979786e04fd306e83924a10f5ee2e2",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "assets/laser_module_medium.png",
-                      "size":  14972
+                      "size":  14972,
+                      "hash":  "2f2a56e08fafe2e8d610b2ce0b376974cb03f7a53f62f715d69639bb41f0165a",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "assets/laser_module_micro.png",
-                      "size":  790
+                      "size":  790,
+                      "hash":  "1c7ded095ec24bc8688293d42b0edf8dbc8a3e0ac8e7450e0aca7c08298e551f",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "assets/laser_module_small.png",
-                      "size":  8609
+                      "size":  8609,
+                      "hash":  "98c9b936f74887eaff4cbf3ee98b12d0e0623be29369576f20dc616ae11627cb",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "assets/laser_module_small2.png",
-                      "size":  4487
+                      "size":  4487,
+                      "hash":  "f4f6a5bbfaa5957885d2e496c638af620f962a3f42140ce00019e1c1bbe9006f",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "assets/laser_module_tiny.png",
-                      "size":  1410
+                      "size":  1410,
+                      "hash":  "168b291b12f2ba233b8845c72d5785c5505556fd51c1f274be9782dc13b4ba7d",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "assets/laser_module_xsmall.png",
-                      "size":  2255
+                      "size":  2255,
+                      "hash":  "57d21b17c84e4df4f795e87d9d4e29f47a7751356bf401314bbf560ef40a9f8d",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "assets/reactor_top.png",
-                      "size":  371025
+                      "size":  371025,
+                      "hash":  "3d2b9454ff2f5309df46ec5d4949b9dec0ef600b8ccc3adcf5c5f832f6193992",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "assets/reactor_top_trim_large.png",
-                      "size":  289886
+                      "size":  289886,
+                      "hash":  "5992d64bca3ec8d06ee0914b77809e775a2897769c25335945b9ced8a0d4bf54",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "assets/reactor_top_trim_medium.png",
-                      "size":  151303
+                      "size":  151303,
+                      "hash":  "6dbb761ab4a1a5e5a3aa5d4436bf0336d608b95e4b11530d37923378cdc92950",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "assets/reactor_top_trim_micro.png",
-                      "size":  5929
+                      "size":  5929,
+                      "hash":  "db101c18e1609f50255fd9ab7fc9a9fbd366945ab65525814f9139189c3c4cf3",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "assets/reactor_top_trim_small.png",
-                      "size":  54332
+                      "size":  54332,
+                      "hash":  "934c3cab572510f86a41db26b06a8df9f3c721dbd85d001c5f00f7cb1acbc52b",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "assets/reactor_top_trim_small2.png",
-                      "size":  35558
+                      "size":  35558,
+                      "hash":  "8d5836b1f12478ebca0b21443a1da80fc43a8bfaf7348fdbc74cc06af84648e4",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "assets/reactor_top_trim_tiny.png",
-                      "size":  12090
+                      "size":  12090,
+                      "hash":  "a2ccb44efdf65130343baa6de168723265756622588c2a5be8a714983db94d33",
+                      "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "assets/reactor_top_trim_xsmall.png",
-                      "size":  19070
+                      "size":  19070,
+                      "hash":  "abb30c5b231bb961843e96e6e806a4bc301c988561a34ab80c799127ca382de6",
+                      "hashAlgo":  "sha256"
+                  },
+                  {
+                      "path":  "core/update/hash.lua",
+                      "size":  4602,
+                      "hash":  "ffafb4f40747db7592fd50d0c3bf95825af68d244b8316bcb49ec9087c866171",
+                      "hashAlgo":  "sha256"
                   }
               ],
-    "commit":  "e43755ad6348532a0c55eeb810e4d5bc20ca8a4b"
+    "commit":  "de0629e67489231d1e0b06ad1edd14c03def6f63"
 }
