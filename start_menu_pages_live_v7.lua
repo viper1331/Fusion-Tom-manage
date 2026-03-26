@@ -151,8 +151,11 @@ local UpdateVersion = assert(dofile("core/update/version.lua"))
 local UpdateManifest = assert(dofile("core/update/manifest.lua"))
 local UpdateClient = assert(dofile("core/update/client.lua"))
 local UpdateApply = assert(dofile("core/update/apply.lua"))
+local ResponsiveLayout = assert(dofile("ui/helpers/layout.lua"))
 local NavigationView = assert(dofile("ui/components/navigation.lua"))
 local UpdatePageView = assert(dofile("ui/pages/update_page.lua"))
+local ControlPageView = assert(dofile("ui/pages/control_page.lua"))
+local FuelPageView = assert(dofile("ui/pages/fuel_page.lua"))
 
 -- === External config loader ===
 local function loadExternalConfig()
@@ -1104,23 +1107,11 @@ local function buildUI()
 end
 
 local function splitVertical(r, topRatio, gap)
-  gap = gap or ui.gap
-  local topH = math.floor((r.h - gap) * topRatio)
-  return {
-    x = r.x, y = r.y, w = r.w, h = topH
-  }, {
-    x = r.x, y = r.y + topH + gap, w = r.w, h = r.h - topH - gap
-  }
+  return ResponsiveLayout.splitVertical(r, topRatio, gap or ui.gap)
 end
 
 local function splitHorizontal(r, leftRatio, gap)
-  gap = gap or ui.gap
-  local leftW = math.floor((r.w - gap) * leftRatio)
-  return {
-    x = r.x, y = r.y, w = leftW, h = r.h
-  }, {
-    x = r.x + leftW + gap, y = r.y, w = r.w - leftW - gap, h = r.h
-  }
+  return ResponsiveLayout.splitHorizontal(r, leftRatio, gap or ui.gap)
 end
 
 -- === Devices / telemetry ===
@@ -2799,96 +2790,37 @@ local function drawOverviewPage(r, data)
 end
 
 local function drawControlPage(r, data)
-  local left, right
-  if ui.compact then
-    left, right = splitVertical(r, 0.54)
-  else
-    left, right = splitHorizontal(r, 0.52)
-  end
-
-  drawPanel(left.x, left.y, left.w, left.h, "COMMAND CENTER")
-
-  local pad = ui.pad
-  local gap = ui.gap
-  local bw = math.floor((left.w - pad * 2 - gap) / 2)
-  local bh = math.max(ui.buttonH, sv(36))
-  local x1 = left.x + pad
-  local x2 = x1 + bw + gap
-  local y1 = left.y + sv(54)
-  local y2 = y1 + bh + sv(12)
-  local y3 = y2 + bh + sv(12)
-
-  drawButton("START", x1, y1, bw, bh, "[START]", "green", true)
-  drawButton("STOP", x2, y1, bw, bh, "[STOP]", "red", true)
-  drawButton("AUTO", x1, y2, bw, bh, state.auto and "[AUTO UI ON]" or "[AUTO UI OFF]", "orange", true)
-  drawButton("SCRAM", x2, y2, bw, bh, "[SCRAM]", "red", true)
-  drawButton("FIRE_LASER", x1, y3, bw, bh, "[FIRE LASER]", "cyan", true)
-  drawButton("FILL_HOHLRAUM", x2, y3, bw, bh, "[HOHLRAUM]", "purple", true)
-
-  local infoY = y3 + bh + sv(18)
-  drawToggleRow(left, infoY, "MODE", data.logicMode, C.cyan)
-  drawToggleRow(left, infoY + sv(18), "STATUS", data.status, chooseStateColor(data))
-  drawToggleRow(left, infoY + sv(36), "AMPLIFIER", data.laserAmplifierText, data.laserReady and C.green or C.orange)
-  drawToggleRow(left, infoY + sv(54), "LAST ACTION", state.lastAction, C.cyan)
-
-  drawPanel(right.x, right.y, right.w, right.h, "MANAGEMENT")
-  local rx = right.x + ui.pad
-  local rw = right.w - ui.pad * 2
-  local rowY = right.y + sv(54)
-
-  drawToggleRow(right, rowY, "IGNITION PROFILE (UI)", "P" .. tostring(state.ignitionProfile), C.yellow)
-  drawToggleRow(right, rowY + sv(18), "MANUAL FUEL", state.manualFuel and "OPEN" or "CLOSED", state.manualFuel and C.orange or C.muted)
-  drawToggleRow(right, rowY + sv(36), "MAINTENANCE", state.maintenance and "ON" or "OFF", state.maintenance and C.orange or C.muted)
-  drawToggleRow(right, rowY + sv(54), "LASER RELAY", relaySideConfigured("laserCharge") or "UNSET", relaySideConfigured("laserCharge") and C.green or C.orange)
-  drawToggleRow(right, rowY + sv(72), "DEUT RELAY", relaySideConfigured("deuteriumTank") or "UNSET", relaySideConfigured("deuteriumTank") and C.green or C.orange)
-  drawToggleRow(right, rowY + sv(90), "TRIT RELAY", relaySideConfigured("tritiumTank") or "UNSET", relaySideConfigured("tritiumTank") and C.green or C.orange)
-  drawToggleRow(right, rowY + sv(108), "HOHLRAUM", data.hohlraumLoaded and "LOADED" or "MISSING", data.hohlraumLoaded and C.green or C.red)
-
-  local by1 = right.y + right.h - sv(122)
-  local bw2 = math.floor((rw - gap) / 2)
-  local bx1 = rx
-  local bx2 = rx + bw2 + gap
-
-  drawButton("PROFILE_PREV", bx1, by1, bw2, bh, "[PROFILE UI -]", "purple", true)
-  drawButton("PROFILE_NEXT", bx2, by1, bw2, bh, "[PROFILE UI +]", "purple", true)
-  drawButton("MANUAL_FUEL", bx1, by1 + bh + sv(12), bw2, bh, state.manualFuel and "[FUEL CLOSE]" or "[FUEL OPEN]", "orange", true)
-  drawButton("MAINTENANCE", bx2, by1 + bh + sv(12), bw2, bh, state.maintenance and "[MAINT OFF]" or "[MAINT ON]", "orange", true)
+  ControlPageView.draw({
+    rect = r,
+    data = data,
+    ui = ui,
+    colors = C,
+    state = state,
+    splitVertical = splitVertical,
+    splitHorizontal = splitHorizontal,
+    drawPanel = drawPanel,
+    drawButton = drawButton,
+    drawToggleRow = drawToggleRow,
+    chooseStateColor = chooseStateColor,
+    relaySideConfigured = relaySideConfigured,
+    sv = sv,
+  })
 end
 
 local function drawFuelPage(r, data)
-  local top, bottom = splitVertical(r, 0.56)
-
-  drawPanel(top.x, top.y, top.w, top.h, "FUEL MANAGEMENT")
-  local x = top.x + ui.pad
-  local w = top.w - ui.pad * 2
-  local topY = top.y + sv(54)
-  local step = ui.gaugeH + sv(20)
-
-  drawGauge(x, topY, w, ui.gaugeH, data.dPct, C.green, "DEUTERIUM CORE", tostring(math.floor(data.dPct + 0.5)) .. " %")
-  drawGauge(x, topY + step, w, ui.gaugeH, data.tPct, C.cyan, "TRITIUM CORE", tostring(math.floor(data.tPct + 0.5)) .. " %")
-  drawGauge(x, topY + step * 2, w, ui.gaugeH, data.dtPct, C.yellow, "D-T CORE", tostring(math.floor(data.dtPct + 0.5)) .. " %")
-  drawGauge(x, topY + step * 3, w, ui.gaugeH, data.energyPct, C.green, "ENERGY BUFFER", data.energyText)
-
-  local infoY = top.y + top.h - sv(92)
-  drawToggleRow(top, infoY, "SUPPLY D", data.readers.deuterium.amountText, data.readers.deuterium.ok and C.green or C.orange)
-  drawToggleRow(top, infoY + sv(18), "SUPPLY T", data.readers.tritium.amountText, data.readers.tritium.ok and C.cyan or C.orange)
-  drawToggleRow(top, infoY + sv(36), "SUPPLY DT", data.readers.dtFuel.amountText, data.readers.dtFuel.ok and C.yellow or C.orange)
-  drawToggleRow(top, infoY + sv(54), "ACTIVE READER", data.activeReader, data.activeReaderColor)
-
-  drawPanel(bottom.x, bottom.y, bottom.w, bottom.h, "FUEL ACTIONS")
-  local pad = ui.pad
-  local gap = ui.gap
-  local bw = math.floor((bottom.w - pad * 2 - gap) / 2)
-  local bh = math.max(ui.buttonH, sv(36))
-  local x1 = bottom.x + pad
-  local x2 = x1 + bw + gap
-  local y1 = bottom.y + sv(54)
-  local y2 = y1 + bh + sv(12)
-
-  drawButton("MANUAL_FUEL", x1, y1, bw, bh, state.manualFuel and "[FUEL CLOSE]" or "[FUEL OPEN]", "orange", true)
-  drawButton("FILL_HOHLRAUM", x2, y1, bw, bh, "[LOAD HOHLRAUM]", "purple", true)
-  drawButton("PROFILE_PREV", x1, y2, bw, bh, "[PROFILE UI -]", "purple", true)
-  drawButton("PROFILE_NEXT", x2, y2, bw, bh, "[PROFILE UI +]", "purple", true)
+  FuelPageView.draw({
+    rect = r,
+    data = data,
+    ui = ui,
+    colors = C,
+    state = state,
+    splitVertical = splitVertical,
+    drawPanel = drawPanel,
+    drawGauge = drawGauge,
+    drawToggleRow = drawToggleRow,
+    drawButton = drawButton,
+    sv = sv,
+  })
 end
 
 local function drawSystemPage(r, data)
