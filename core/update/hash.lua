@@ -14,6 +14,8 @@ local lshift = bit.lshift
 local rrotate = bit.rrotate
 
 local MOD32 = 4294967296
+local BLOCK_YIELD_INTERVAL = 2
+local ROUND_YIELD_INTERVAL = 16
 
 local K = {
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
@@ -69,6 +71,12 @@ local function normalizeAlgo(algo)
   return algo
 end
 
+local function cooperativeYield()
+  if type(sleep) == "function" then
+    sleep(0)
+  end
+end
+
 local function sha256Binary(message)
   message = type(message) == "string" and message or tostring(message or "")
 
@@ -98,7 +106,10 @@ local function sha256Binary(message)
   }
 
   local w = {}
+  local chunkIndex = 0
   for chunkStart = 1, #padded, 64 do
+    chunkIndex = chunkIndex + 1
+
     for i = 0, 15 do
       w[i] = readU32BE(padded, chunkStart + i * 4)
     end
@@ -134,6 +145,10 @@ local function sha256Binary(message)
       c = b
       b = a
       a = add32(temp1, temp2)
+
+      if (i + 1) % ROUND_YIELD_INTERVAL == 0 then
+        cooperativeYield()
+      end
     end
 
     h[1] = add32(h[1], a)
@@ -144,6 +159,10 @@ local function sha256Binary(message)
     h[6] = add32(h[6], f)
     h[7] = add32(h[7], g)
     h[8] = add32(h[8], j)
+
+    if chunkIndex % BLOCK_YIELD_INTERVAL == 0 then
+      cooperativeYield()
+    end
   end
 
   return string.format(
