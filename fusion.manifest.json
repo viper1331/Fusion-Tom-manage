@@ -1,6 +1,6 @@
 {
     "name":  "Fusion-Tom-manage",
-    "version":  "1.2.10",
+    "version":  "1.2.11",
     "channel":  "stable",
     "entrypoint":  "start_menu_pages_live_v7.lua",
     "source":  {
@@ -8,7 +8,7 @@
                    "repo":  "Fusion-Tom-manage",
                    "branch":  "main",
                    "manifestPath":  "fusion.manifest.json",
-                   "commit":  "91fb9fc5dd94dacba52aea8e67e639ce6be56ac7"
+                   "commit":  "fad46e38fafbe7b0e0e9b6e290bae9ee2c5ff106"
                },
     "integrity":  {
                       "mode":  "hash+size",
@@ -22,8 +22,8 @@
     "files":  [
                   {
                       "path":  "start_menu_pages_live_v7.lua",
-                      "size":  71173,
-                      "hash":  "fcc33dd94157ab957d4d0eab0db6d04b9af89f756bf89954d39ab7c84be21e9d",
+                      "size":  67719,
+                      "hash":  "c95955629c2aca774b10b65368d6c06681dbd17a7e0607d27eba31b2c7ade057",
                       "hashAlgo":  "sha256"
                   },
                   {
@@ -41,7 +41,7 @@
                   {
                       "path":  "fusion.version",
                       "size":  7,
-                      "hash":  "4304275f30e076c76abdc0f280f0fdd5537f1ac700953ba1908e29a64d531919",
+                      "hash":  "37310c7f348165122ccb9f4a854c29485395bb3af0659ba5a77be066c1511679",
                       "hashAlgo":  "sha256"
                   },
                   {
@@ -226,10 +226,16 @@
                   },
                   {
                       "path":  "core/runtime/telemetry_runtime.lua",
-                      "size":  15231,
-                      "hash":  "73797751cd628e7faa20c08c4e0d1a3358be68349f93c21b3c9d24dbfebb4a57",
+                      "size":  15422,
+                      "hash":  "81c3cc0b408e23a74e0e60caf59aefc6172d6823c695e45666d75f57d6803fb1",
+                      "hashAlgo":  "sha256"
+                  },
+                  {
+                      "path":  "core/runtime/action_runtime.lua",
+                      "size":  5989,
+                      "hash":  "9163a752980f59859db025665b799ffc854b561f5fd127ceb3de80108404bb27",
                       "hashAlgo":  "sha256"
                   }
               ],
-    "commit":  "91fb9fc5dd94dacba52aea8e67e639ce6be56ac7"
+    "commit":  "fad46e38fafbe7b0e0e9b6e290bae9ee2c5ff106"
 }
