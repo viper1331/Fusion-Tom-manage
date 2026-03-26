@@ -298,6 +298,9 @@ local state = {
     localVersion = "n/a",
     remoteVersion = "n/a",
     channel = UPDATE_CFG.channel,
+    remoteBranch = UPDATE_CFG.branch,
+    remoteCommit = "n/a",
+    manifestUrl = "n/a",
     remoteStatus = UPDATE_STATUS.IDLE,
     statusDetail = "waiting for check",
     statusAt = "never",
@@ -310,6 +313,7 @@ local state = {
     lastCheckSummary = "not checked",
     logs = {},
     remoteManifest = nil,
+    remoteManifestText = nil,
     remoteSource = nil,
     localManifest = nil,
     pendingFiles = {},
@@ -1841,6 +1845,29 @@ local function setDownloadedState(flag, count)
   end
 end
 
+local function shortCommit(commit, length)
+  local value = type(commit) == "string" and commit or ""
+  if value == "" or value == "n/a" then
+    return "n/a"
+  end
+
+  local size = math.max(4, math.floor(length or 8))
+  if #value <= size then
+    return value
+  end
+  return string.sub(value, 1, size)
+end
+
+local function writeTextFile(path, text)
+  local fh = fs.open(path, "w")
+  if not fh then
+    return false, "cannot write file: " .. tostring(path)
+  end
+  fh.write(text or "")
+  fh.close()
+  return true
+end
+
 local function parseSizeMismatchDetail(raw)
   local path = string.match(raw, "size mismatch for ([^:]+)")
   local expected = string.match(raw, "expected=([0-9]+)")
@@ -1860,7 +1887,13 @@ local function formatUpdateUserError(step, err)
     return step .. ": remote file not found (404). Check owner/repo/branch/manifestPath."
   end
   if string.find(lower, "source incomplete", 1, true) then
-    return step .. ": update source is incomplete (owner/repo/branch)."
+    return step .. ": update source is incomplete (owner/repo/branch/commit)."
+  end
+  if string.find(lower, "manifest commit missing or invalid", 1, true) then
+    return step .. ": manifest commit missing/invalid (expected 40-hex sha)."
+  end
+  if string.find(lower, "requires pinned commit", 1, true) then
+    return step .. ": download source must support commit pinning ({commit} or {ref})."
   end
   if string.find(lower, "staging", 1, true) then
     return step .. ": staging is invalid or incomplete. Run DOWNLOAD again."
@@ -1906,8 +1939,16 @@ local function buildUpdateSource(remoteManifest)
     owner = tostring(UPDATE_CFG.owner or ""),
     repo = tostring(UPDATE_CFG.repo or ""),
     branch = tostring(UPDATE_CFG.branch or "main"),
+    commit = "",
     rawBaseUrl = tostring(UPDATE_CFG.rawBaseUrl or ""),
   }
+
+  if type(remoteManifest) == "table" then
+    local resolvedCommit = UpdateManifest.resolveCommit(remoteManifest)
+    if type(resolvedCommit) == "string" and resolvedCommit ~= "" then
+      source.commit = resolvedCommit
+    end
+  end
 
   if type(remoteManifest) == "table" and type(remoteManifest.source) == "table" then
     if source.rawBaseUrl == "" and type(remoteManifest.source.rawBaseUrl) == "string" and remoteManifest.source.rawBaseUrl ~= "" then
@@ -1921,6 +1962,9 @@ local function buildUpdateSource(remoteManifest)
     end
     if source.branch == "" and type(remoteManifest.source.branch) == "string" then
       source.branch = remoteManifest.source.branch
+    end
+    if source.commit == "" and type(remoteManifest.source.commit) == "string" and remoteManifest.source.commit ~= "" then
+      source.commit = remoteManifest.source.commit
     end
   end
 
@@ -1939,13 +1983,39 @@ local function resolveManifestPath(remoteManifest)
   return UPDATE_MANIFEST_FILE
 end
 
-local function validateUpdateSource(source)
+local function rawBaseSupportsPinnedRef(rawBaseUrl)
+  if type(rawBaseUrl) ~= "string" or rawBaseUrl == "" then
+    return false
+  end
+  return string.find(rawBaseUrl, "{commit}", 1, true) ~= nil or string.find(rawBaseUrl, "{ref}", 1, true) ~= nil
+end
+
+local function validateUpdateSource(source, requireCommit)
+  requireCommit = requireCommit == true
+
   if type(source.rawBaseUrl) == "string" and source.rawBaseUrl ~= "" then
+    if requireCommit and not rawBaseSupportsPinnedRef(source.rawBaseUrl) then
+      return false, "download source requires pinned commit in rawBaseUrl ({commit} or {ref})"
+    end
+    if requireCommit and not UpdateManifest.isValidCommit(source.commit) then
+      return false, "manifest commit missing or invalid (expected 40-hex sha)"
+    end
     return true
   end
 
-  if source.owner == "" or source.repo == "" or source.branch == "" then
-    return false, "update source incomplete (owner/repo/branch)"
+  if source.owner == "" or source.repo == "" then
+    return false, "update source incomplete (owner/repo)"
+  end
+
+  if requireCommit then
+    if not UpdateManifest.isValidCommit(source.commit) then
+      return false, "manifest commit missing or invalid (expected 40-hex sha)"
+    end
+    return true
+  end
+
+  if source.branch == "" then
+    return false, "update source incomplete (branch)"
   end
 
   return true
@@ -1977,8 +2047,13 @@ local function performUpdateCheck(reason)
   state.update.applyConfirmArmed = false
   state.update.lastCheck = nowText()
   setDownloadedState(false, 0)
+  state.update.remoteCommit = "n/a"
+  state.update.remoteBranch = tostring(UPDATE_CFG.branch or "main")
+  state.update.manifestUrl = "n/a"
+  state.update.remoteManifestText = nil
   setUpdateStatus(UPDATE_STATUS.CHECKING, "fetching remote manifest", true)
   appendUpdateLogLine("CHECK start: reason=" .. tostring(reason or "manual"))
+  appendUpdateLogLine("CHECK configured branch: " .. tostring(UPDATE_CFG.branch or "main"))
   refreshLocalUpdateSnapshot()
 
   if not UpdateClient.isHttpEnabled() then
@@ -1986,33 +2061,49 @@ local function performUpdateCheck(reason)
   end
 
   local source = buildUpdateSource(nil)
-  local sourceOk, sourceErr = validateUpdateSource(source)
+  state.update.remoteBranch = tostring(source.branch ~= "" and source.branch or UPDATE_CFG.branch or "main")
+  local sourceOk, sourceErr = validateUpdateSource(source, false)
   if not sourceOk then
     return failUpdateStep("CHECK", UPDATE_STATUS.CHECK_FAILED, sourceErr)
   end
 
   local manifestPath = resolveManifestPath(nil)
   local manifestUrl = UpdateClient.buildRawUrl(source, manifestPath)
+  state.update.manifestUrl = manifestUrl
   appendUpdateLogLine("CHECK manifest url: " .. tostring(manifestUrl))
-  local remoteManifest, remoteErr = UpdateManifest.readRemote(UpdateClient, manifestUrl)
+  local remoteManifest, remoteManifestTextOrErr = UpdateManifest.readRemote(UpdateClient, manifestUrl)
   if not remoteManifest then
-    return failUpdateStep("CHECK", UPDATE_STATUS.CHECK_FAILED, remoteErr)
+    return failUpdateStep("CHECK", UPDATE_STATUS.CHECK_FAILED, remoteManifestTextOrErr)
   end
+  local remoteManifestText = remoteManifestTextOrErr
 
   local remoteSource = buildUpdateSource(remoteManifest)
-  local remoteSourceOk, remoteSourceErr = validateUpdateSource(remoteSource)
+  local remoteSourceOk, remoteSourceErr = validateUpdateSource(remoteSource, false)
   if not remoteSourceOk then
     return failUpdateStep("CHECK", UPDATE_STATUS.CHECK_FAILED, remoteSourceErr)
   end
 
+  local manifestReady, manifestCommitOrErr = UpdateManifest.validateDownloadManifest(remoteManifest)
+  if manifestReady then
+    remoteSource.commit = manifestCommitOrErr
+    state.update.remoteCommit = manifestCommitOrErr
+  else
+    state.update.remoteCommit = "n/a"
+    appendUpdateLogLine("CHECK warning: " .. tostring(manifestCommitOrErr))
+  end
+
   state.update.remoteManifest = remoteManifest
+  state.update.remoteManifestText = type(remoteManifestText) == "string" and remoteManifestText or nil
   state.update.remoteSource = remoteSource
   state.update.remoteVersion = tostring(remoteManifest.version or "n/a")
   state.update.channel = tostring(remoteManifest.channel or UPDATE_CFG.channel)
+  state.update.remoteBranch = tostring(remoteSource.branch ~= "" and remoteSource.branch or state.update.remoteBranch)
+  appendUpdateLogLine("CHECK mode: manifest via branch, files pinned by commit")
+  appendUpdateLogLine("CHECK session branch=" .. tostring(state.update.remoteBranch) .. ", commit=" .. tostring(state.update.remoteCommit))
   appendUpdateLogLine("CHECK integrity mode: " .. tostring(remoteManifest.integrity and remoteManifest.integrity.mode or "size"))
   state.update.pendingFiles = UpdateManifest.computePendingFiles(state.update.localManifest, remoteManifest)
   state.update.filesToUpdate = #state.update.pendingFiles
-  state.update.lastError = "none"
+  state.update.lastError = manifestReady and "none" or formatUpdateUserError("CHECK", manifestCommitOrErr)
   setDownloadedState(false, 0)
 
   local newer, cmpErr = UpdateVersion.isRemoteNewer(state.update.localVersion, state.update.remoteVersion)
@@ -2032,9 +2123,22 @@ local function performUpdateCheck(reason)
     status = UPDATE_STATUS.UP_TO_DATE
   end
 
-  state.update.lastCheckSummary = status == UPDATE_STATUS.UPDATE_AVAILABLE and "update available" or "up to date"
-  setUpdateStatus(status, "local=" .. tostring(state.update.localVersion) .. " remote=" .. tostring(state.update.remoteVersion) .. " pending=" .. tostring(state.update.filesToUpdate), true)
-  appendUpdateLogLine("CHECK done: local=" .. tostring(state.update.localVersion) .. ", remote=" .. tostring(state.update.remoteVersion) .. ", files=" .. tostring(state.update.filesToUpdate))
+  if status == UPDATE_STATUS.UPDATE_AVAILABLE and not manifestReady then
+    state.update.lastCheckSummary = "update available (download blocked)"
+  else
+    state.update.lastCheckSummary = status == UPDATE_STATUS.UPDATE_AVAILABLE and "update available" or "up to date"
+  end
+
+  local detail = "local=" .. tostring(state.update.localVersion)
+    .. " remote=" .. tostring(state.update.remoteVersion)
+    .. " pending=" .. tostring(state.update.filesToUpdate)
+    .. " commit=" .. tostring(shortCommit(state.update.remoteCommit, 8))
+  if not manifestReady then
+    detail = detail .. " (download blocked)"
+  end
+
+  setUpdateStatus(status, detail, true)
+  appendUpdateLogLine("CHECK done: local=" .. tostring(state.update.localVersion) .. ", remote=" .. tostring(state.update.remoteVersion) .. ", files=" .. tostring(state.update.filesToUpdate) .. ", commit=" .. tostring(state.update.remoteCommit))
   return true, state.update.lastCheckSummary
 end
 
@@ -2051,8 +2155,22 @@ local function performUpdateDownload()
   end
 
   local remoteManifest = state.update.remoteManifest
+  local manifestReady, manifestCommitOrErr = UpdateManifest.validateDownloadManifest(remoteManifest)
+  if not manifestReady then
+    clearStagingWithLog("manifest invalid for download")
+    setDownloadedState(false, 0)
+    return failUpdateStep("DOWNLOAD", UPDATE_STATUS.DOWNLOAD_FAILED, manifestCommitOrErr)
+  end
+
+  local manifestCommit = manifestCommitOrErr
+  state.update.remoteCommit = manifestCommit
   local remoteSource = state.update.remoteSource or buildUpdateSource(remoteManifest)
-  local sourceOk, sourceErr = validateUpdateSource(remoteSource)
+  remoteSource.commit = manifestCommit
+  state.update.remoteSource = remoteSource
+  state.update.remoteBranch = tostring(remoteSource.branch ~= "" and remoteSource.branch or UPDATE_CFG.branch or "main")
+  appendUpdateLogLine("DOWNLOAD mode: manifest branch=" .. tostring(state.update.remoteBranch) .. ", files commit=" .. tostring(manifestCommit))
+
+  local sourceOk, sourceErr = validateUpdateSource(remoteSource, true)
   if not sourceOk then
     clearStagingWithLog("source invalid")
     setDownloadedState(false, 0)
@@ -2078,6 +2196,7 @@ local function performUpdateDownload()
   local stagingContext = {
     remoteVersion = tostring(state.update.remoteVersion or "n/a"),
     manifestVersion = tostring(remoteManifest.version or "n/a"),
+    remoteCommit = tostring(manifestCommit or ""),
     channel = tostring(state.update.channel or "stable"),
     checkedAt = tostring(state.update.lastCheck or "never"),
   }
@@ -2100,8 +2219,8 @@ local function performUpdateDownload()
   state.update.lastDownload = nowText()
   state.update.lastError = "none"
   state.update.lastCheckSummary = "ready to apply"
-  setUpdateStatus(UPDATE_STATUS.READY_TO_APPLY, "downloaded files=" .. tostring(#downloaded), true)
-  appendUpdateLogLine("DOWNLOAD done: files=" .. tostring(#downloaded))
+  setUpdateStatus(UPDATE_STATUS.READY_TO_APPLY, "downloaded files=" .. tostring(#downloaded) .. " commit=" .. tostring(shortCommit(manifestCommit, 8)), true)
+  appendUpdateLogLine("DOWNLOAD done: files=" .. tostring(#downloaded) .. ", commit=" .. tostring(manifestCommit))
 
   return true, "ready to apply (" .. tostring(#downloaded) .. " files)"
 end
@@ -2130,6 +2249,7 @@ local function performUpdateApply()
   local expectedContext = {
     remoteVersion = tostring(state.update.remoteVersion or "n/a"),
     manifestVersion = tostring(remoteManifest.version or "n/a"),
+    remoteCommit = tostring(state.update.remoteCommit or ""),
   }
 
   local stageOk, stageErr = UpdateApply.validateStaging(remoteManifest.files, UPDATE_TEMP_DIR, expectedContext)
@@ -2172,6 +2292,15 @@ local function performUpdateApply()
   end
 
   clearStagingWithLog("after apply success")
+  if type(state.update.remoteManifestText) == "string" and state.update.remoteManifestText ~= "" then
+    local manifestWriteOk, manifestWriteErr = writeTextFile(UPDATE_MANIFEST_FILE, state.update.remoteManifestText)
+    if manifestWriteOk then
+      appendUpdateLogLine("APPLY refreshed local manifest from checked branch source")
+    else
+      appendUpdateLogLine("APPLY warning: manifest refresh failed: " .. tostring(manifestWriteErr))
+    end
+  end
+
   state.update.lastApply = nowText()
   setDownloadedState(false, 0)
   state.update.pendingFiles = {}
@@ -2180,7 +2309,7 @@ local function performUpdateApply()
   state.update.lastCheckSummary = "up to date"
   refreshLocalUpdateSnapshot()
   setUpdateStatus(UPDATE_STATUS.UP_TO_DATE, "apply completed successfully", true)
-  appendUpdateLogLine("APPLY success: local version=" .. tostring(state.update.localVersion))
+  appendUpdateLogLine("APPLY success: local version=" .. tostring(state.update.localVersion) .. ", commit=" .. tostring(state.update.remoteCommit))
 
   return true, "apply done"
 end
@@ -2350,21 +2479,25 @@ local function drawMicroMajPage(r, data)
   drawText(infoRect.x + 1, rowY, "LV", C.text, 1)
   drawTextRight(infoRect.x + infoRect.w - 1, rowY, state.update.localVersion, C.cyan, 1)
 
-  rowY = rowY + 10
+  rowY = rowY + 9
   drawText(infoRect.x + 1, rowY, "RV", C.text, 1)
   drawTextRight(infoRect.x + infoRect.w - 1, rowY, state.update.remoteVersion, C.yellow, 1)
 
-  rowY = rowY + 10
+  rowY = rowY + 9
+  drawText(infoRect.x + 1, rowY, "BR", C.text, 1)
+  drawTextRight(infoRect.x + infoRect.w - 1, rowY, state.update.remoteBranch or "-", C.text, 1)
+
+  rowY = rowY + 9
+  drawText(infoRect.x + 1, rowY, "CM", C.text, 1)
+  drawTextRight(infoRect.x + infoRect.w - 1, rowY, shortCommit(state.update.remoteCommit, 8), C.cyan, 1)
+
+  rowY = rowY + 9
   drawText(infoRect.x + 1, rowY, "ST", C.text, 1)
   drawTextRight(infoRect.x + infoRect.w - 1, rowY, state.update.remoteStatus, updateStatusColor(state.update.remoteStatus), 1)
 
-  rowY = rowY + 10
-  drawText(infoRect.x + 1, rowY, "FILES", C.text, 1)
+  rowY = rowY + 9
+  drawText(infoRect.x + 1, rowY, "FL", C.text, 1)
   drawTextRight(infoRect.x + infoRect.w - 1, rowY, tostring(state.update.filesToUpdate), state.update.filesToUpdate > 0 and C.orange or C.green, 1)
-
-  rowY = rowY + 10
-  drawText(infoRect.x + 1, rowY, "ERR", C.text, 1)
-  drawTextRight(infoRect.x + infoRect.w - 1, rowY, state.update.lastError == "none" and "-" or firstLine(state.update.lastError), state.update.lastError == "none" and C.muted or C.red, 1)
 
   local pad = 1
   local gap = math.max(1, math.floor(ui.smallPad * 0.6))
@@ -2403,6 +2536,8 @@ local function drawUpdatePage(r)
     { label = "LOCAL VERSION", value = state.update.localVersion, color = C.cyan },
     { label = "REMOTE VERSION", value = state.update.remoteVersion, color = C.yellow },
     { label = "CHANNEL", value = state.update.channel, color = C.text },
+    { label = "BRANCH", value = state.update.remoteBranch or "-", color = C.text },
+    { label = "REMOTE COMMIT", value = shortCommit(state.update.remoteCommit, 12), color = C.cyan },
     { label = "FILES TO UPDATE", value = tostring(state.update.filesToUpdate), color = state.update.filesToUpdate > 0 and C.orange or C.green },
     { label = "LAST CHECK", value = state.update.lastCheck, color = C.text },
     { label = "LAST APPLY", value = state.update.lastApply, color = C.text },

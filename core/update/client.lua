@@ -23,6 +23,43 @@ local function normalizeUrl(url)
   return url
 end
 
+local function nonEmpty(value)
+  if type(value) == "string" and value ~= "" then
+    return value
+  end
+  return nil
+end
+
+local function resolveSourceRef(source)
+  local commit = nonEmpty(source and source.commit)
+  if commit then
+    return commit
+  end
+
+  local branch = nonEmpty(source and source.branch)
+  if branch then
+    return branch
+  end
+
+  return "main"
+end
+
+local function buildTemplateBaseUrl(source)
+  local base = normalizeUrl(source and source.rawBaseUrl or "")
+  local owner = tostring(source and source.owner or "")
+  local repo = tostring(source and source.repo or "")
+  local branch = tostring(nonEmpty(source and source.branch) or "main")
+  local commit = tostring(nonEmpty(source and source.commit) or "")
+  local ref = tostring(resolveSourceRef(source))
+
+  base = string.gsub(base, "{owner}", owner)
+  base = string.gsub(base, "{repo}", repo)
+  base = string.gsub(base, "{branch}", branch)
+  base = string.gsub(base, "{commit}", commit)
+  base = string.gsub(base, "{ref}", ref)
+  return base
+end
+
 function M.isHttpEnabled()
   return type(http) == "table" and type(http.get) == "function"
 end
@@ -32,13 +69,13 @@ function M.buildRawUrl(source, relativePath)
   local rawBaseUrl = source and source.rawBaseUrl
 
   if type(rawBaseUrl) == "string" and rawBaseUrl ~= "" then
-    return normalizeUrl(rawBaseUrl) .. "/" .. rel
+    return buildTemplateBaseUrl(source) .. "/" .. rel
   end
 
   local owner = source and source.owner or ""
   local repo = source and source.repo or ""
-  local branch = source and source.branch or "main"
-  return "https://raw.githubusercontent.com/" .. owner .. "/" .. repo .. "/" .. branch .. "/" .. rel
+  local ref = resolveSourceRef(source)
+  return "https://raw.githubusercontent.com/" .. owner .. "/" .. repo .. "/" .. ref .. "/" .. rel
 end
 
 function M.fetch(url, binary)

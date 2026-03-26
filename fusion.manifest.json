@@ -1,13 +1,14 @@
 {
     "name":  "Fusion-Tom-manage",
-    "version":  "1.2.2",
+    "version":  "1.2.3",
     "channel":  "stable",
     "entrypoint":  "start_menu_pages_live_v7.lua",
     "source":  {
                    "owner":  "viper1331",
                    "repo":  "Fusion-Tom-manage",
                    "branch":  "main",
-                   "manifestPath":  "fusion.manifest.json"
+                   "manifestPath":  "fusion.manifest.json",
+                   "commit":  "82dbc53a55164abfd98b6ff1a35569c87107ca79"
                },
     "integrity":  {
                       "mode":  "size",
@@ -19,7 +20,7 @@
     "files":  [
                   {
                       "path":  "start_menu_pages_live_v7.lua",
-                      "size":  99363
+                      "size":  105194
                   },
                   {
                       "path":  "install.lua",
@@ -42,15 +43,15 @@
                   },
                   {
                       "path":  "core/update/manifest.lua",
-                      "size":  5854
+                      "size":  7564
                   },
                   {
                       "path":  "core/update/client.lua",
-                      "size":  4562
+                      "size":  5571
                   },
                   {
                       "path":  "core/update/apply.lua",
-                      "size":  9004
+                      "size":  9219
                   },
                   {
                       "path":  "gpu_debug.lua",
@@ -124,5 +125,6 @@
                       "path":  "assets/reactor_top_trim_xsmall.png",
                       "size":  19070
                   }
-              ]
+              ],
+    "commit":  "82dbc53a55164abfd98b6ff1a35569c87107ca79"
 }

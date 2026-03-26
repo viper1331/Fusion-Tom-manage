@@ -189,6 +189,9 @@ function M.validateStaging(fileEntries, stagingDir, expectedContext)
     if type(expectedContext.manifestVersion) == "string" and expectedContext.manifestVersion ~= "" and stagedContext.manifestVersion ~= expectedContext.manifestVersion then
       return false, "staging manifest mismatch"
     end
+    if type(expectedContext.remoteCommit) == "string" and expectedContext.remoteCommit ~= "" and stagedContext.remoteCommit ~= expectedContext.remoteCommit then
+      return false, "staging commit mismatch"
+    end
   end
 
   for i, entry in ipairs(fileEntries or {}) do

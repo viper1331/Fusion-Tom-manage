@@ -8,6 +8,13 @@ local function normalizePath(path)
   return path
 end
 
+local function trim(value)
+  value = tostring(value or "")
+  value = string.gsub(value, "^%s+", "")
+  value = string.gsub(value, "%s+$", "")
+  return value
+end
+
 local function hasValue(s)
   return type(s) == "string" and string.find(s, "%S") ~= nil
 end
@@ -17,6 +24,17 @@ local function normalizeHash(value)
     return nil
   end
   return string.lower(tostring(value))
+end
+
+local function normalizeCommit(value)
+  if type(value) ~= "string" then
+    return nil
+  end
+  local commit = trim(value)
+  if commit == "" then
+    return nil
+  end
+  return string.lower(commit)
 end
 
 local function decodeJson(text)
@@ -70,6 +88,31 @@ local function normalizeFiles(list)
   return out
 end
 
+function M.isValidCommit(commit)
+  local normalized = normalizeCommit(commit)
+  if not normalized then
+    return false
+  end
+  return string.match(normalized, "^[0-9a-f]+$") ~= nil and #normalized == 40
+end
+
+function M.resolveCommit(manifest)
+  if type(manifest) ~= "table" then
+    return nil
+  end
+
+  local commit = normalizeCommit(manifest.commit)
+  if commit then
+    return commit
+  end
+
+  if type(manifest.source) == "table" then
+    return normalizeCommit(manifest.source.commit)
+  end
+
+  return nil
+end
+
 function M.validate(raw)
   if type(raw) ~= "table" then
     return nil, "manifest is not a table"
@@ -90,6 +133,11 @@ function M.validate(raw)
     return nil, "manifest.entrypoint missing"
   end
 
+  local commit = normalizeCommit(raw.commit)
+  if not commit and type(raw.source) == "table" then
+    commit = normalizeCommit(raw.source.commit)
+  end
+
   local source = {}
   if type(raw.source) == "table" then
     source.owner = hasValue(raw.source.owner) and raw.source.owner or nil
@@ -98,6 +146,7 @@ function M.validate(raw)
     source.manifestPath = hasValue(raw.source.manifestPath) and normalizePath(raw.source.manifestPath) or nil
     source.rawBaseUrl = hasValue(raw.source.rawBaseUrl) and raw.source.rawBaseUrl or nil
   end
+  source.commit = commit
 
   local integrity = {}
   if type(raw.integrity) == "table" then
@@ -116,6 +165,7 @@ function M.validate(raw)
     entrypoint = normalizePath(raw.entrypoint),
     files = files,
     source = source,
+    commit = commit,
     integrity = integrity,
   }
 end
@@ -210,6 +260,28 @@ function M.computePendingFiles(localManifest, remoteManifest)
   end
 
   return pending
+end
+
+function M.validateDownloadManifest(manifest)
+  if type(manifest) ~= "table" then
+    return false, "manifest invalid for download"
+  end
+  if not hasValue(manifest.version) then
+    return false, "manifest version missing"
+  end
+  if not hasValue(manifest.entrypoint) then
+    return false, "manifest entrypoint missing"
+  end
+  if type(manifest.files) ~= "table" or #manifest.files == 0 then
+    return false, "manifest files missing"
+  end
+
+  local commit = M.resolveCommit(manifest)
+  if not M.isValidCommit(commit) then
+    return false, "manifest commit missing or invalid (expected 40-hex sha)"
+  end
+
+  return true, commit
 end
 
 return M
