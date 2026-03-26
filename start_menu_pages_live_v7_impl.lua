@@ -554,7 +554,56 @@ local function sortLaserModuleVariants()
   sortVariantList(images.laserModuleVariants)
 end
 
-local function normalizeAssetVariants(rawVariants, fallbackPrefix)
+local ASSET_TIER_ORDER = { "micro", "tiny", "xsmall", "small2", "small", "medium", "large" }
+local ASSET_TIER_INDEX = {}
+for index, tier in ipairs(ASSET_TIER_ORDER) do
+  ASSET_TIER_INDEX[tier] = index
+end
+
+local function compactError(err)
+  local msg = tostring(err or "unknown")
+  local idx = string.find(msg, "\n", 1, true)
+  if idx then
+    return string.sub(msg, 1, idx - 1)
+  end
+  return msg
+end
+
+local function normalizeTierName(name)
+  local low = string.lower(tostring(name or ""))
+  if ASSET_TIER_INDEX[low] then
+    return low
+  end
+  return nil
+end
+
+local function resolveReactorTier(name)
+  local low = string.lower(tostring(name or ""))
+  if string.sub(low, 1, 5) == "trim_" then
+    local trimmed = string.sub(low, 6)
+    local tier = normalizeTierName(trimmed)
+    if tier then
+      return tier
+    end
+  end
+
+  local direct = normalizeTierName(low)
+  if direct then
+    return direct
+  end
+
+  if low == "base" then
+    return "large"
+  end
+  return nil
+end
+
+local function resolveModuleTier(name)
+  local low = string.lower(tostring(name or ""))
+  return normalizeTierName(low)
+end
+
+local function normalizeAssetVariants(rawVariants, kindLabel)
   local out = {}
   for index, variant in ipairs(rawVariants or {}) do
     local name = nil
@@ -563,50 +612,30 @@ local function normalizeAssetVariants(rawVariants, fallbackPrefix)
       name = variant.name
       path = variant.path
     elseif type(variant) == "string" then
-      name = (fallbackPrefix or "variant") .. "_" .. tostring(index)
+      name = (kindLabel or "variant") .. "_" .. tostring(index)
       path = variant
     end
 
     if type(path) == "string" and path ~= "" then
-      out[#out + 1] = {
-        index = index,
-        name = name or ((fallbackPrefix or "variant") .. "_" .. tostring(index)),
-        path = path,
-      }
+      local variantName = name or ((kindLabel or "variant") .. "_" .. tostring(index))
+      local tier = kindLabel == "reactor" and resolveReactorTier(variantName) or resolveModuleTier(variantName)
+      if not tier then
+        appendUiRuntimeLog("asset " .. tostring(kindLabel) .. ": variant ignored (unknown tier): " .. tostring(variantName))
+      else
+        out[#out + 1] = {
+          index = index,
+          name = variantName,
+          path = path,
+          tier = tier,
+          kind = kindLabel,
+        }
+      end
     end
   end
   return out
 end
 
-local function findVariantIndexByName(variants, preferredName)
-  if type(preferredName) ~= "string" or preferredName == "" then
-    return nil
-  end
-  for index, variant in ipairs(variants) do
-    if variant.name == preferredName then
-      return index
-    end
-  end
-  return nil
-end
-
-local function preferredReactorVariantName()
-  if not ui then
-    return "trim_small2"
-  end
-  if ui.micro then
-    return "trim_tiny"
-  end
-  if ui.compact then
-    return "trim_small2"
-  end
-  if ui.sw >= 1300 and ui.sh >= 900 then
-    return "trim_large"
-  end
-  return "trim_medium"
-end
-
-local function preferredModuleVariantName()
+local function preferredSceneTier()
   if not ui then
     return "small2"
   end
@@ -622,63 +651,209 @@ local function preferredModuleVariantName()
   return "medium"
 end
 
-local function buildVariantLoadOrder(variants, preferredIndex)
-  local order = {}
-  if #variants < 1 then
-    return order
+local function buildTierVariantMap(variants, kindLabel)
+  local map = {}
+  for _, variant in ipairs(variants or {}) do
+    local tier = variant.tier
+    if tier and ASSET_TIER_INDEX[tier] then
+      if not map[tier] then
+        map[tier] = {}
+      end
+      map[tier][#map[tier] + 1] = variant
+    end
   end
 
-  local startAt = math.max(1, math.min(#variants, preferredIndex or #variants))
-  for index = startAt, 1, -1 do
-    order[#order + 1] = index
+  for _, tier in ipairs(ASSET_TIER_ORDER) do
+    if map[tier] then
+      table.sort(map[tier], function(a, b)
+        if kindLabel == "reactor" then
+          local aTrim = string.find(string.lower(a.name), "trim_", 1, true) and 0 or 1
+          local bTrim = string.find(string.lower(b.name), "trim_", 1, true) and 0 or 1
+          if aTrim ~= bTrim then
+            return aTrim < bTrim
+          end
+        end
+        return tostring(a.name) < tostring(b.name)
+      end)
+    end
   end
-  for index = startAt + 1, #variants do
-    order[#order + 1] = index
+
+  return map
+end
+
+local function buildTierFallbackOrder(preferredTier)
+  local order = {}
+  local preferredIndex = ASSET_TIER_INDEX[preferredTier] or ASSET_TIER_INDEX.small2
+
+  for index = preferredIndex, 1, -1 do
+    order[#order + 1] = ASSET_TIER_ORDER[index]
   end
+  for index = preferredIndex + 1, #ASSET_TIER_ORDER do
+    order[#order + 1] = ASSET_TIER_ORDER[index]
+  end
+
   return order
 end
 
-local function loadVariantWithFallback(kindLabel, rawVariants, preferredName)
-  local variants = normalizeAssetVariants(rawVariants, kindLabel)
-  if #variants < 1 then
-    appendUiRuntimeLog("asset " .. tostring(kindLabel) .. ": no variants configured")
-    return nil, false, false
-  end
+local function buildNearestTierOrder(targetTier, tierMap)
+  local order = {}
+  local targetIndex = ASSET_TIER_INDEX[targetTier] or ASSET_TIER_INDEX.small2
+  local seen = {}
 
-  local preferredIndex = findVariantIndexByName(variants, preferredName) or #variants
-  local order = buildVariantLoadOrder(variants, preferredIndex)
-  local sawVramError = false
-  local usedFallback = false
+  for delta = 0, #ASSET_TIER_ORDER do
+    local lowerIndex = targetIndex - delta
+    local higherIndex = targetIndex + delta
 
-  for orderPos, variantIndex in ipairs(order) do
-    local variant = variants[variantIndex]
-    local img, err = loadPng(variant.path)
-    if img then
-      local selected = {
-        name = variant.name,
-        path = variant.path,
-        image = img,
-        width = img.getWidth(),
-        height = img.getHeight(),
-      }
-      usedFallback = orderPos > 1
-      if usedFallback then
-        appendUiRuntimeLog("asset " .. tostring(kindLabel) .. ": fallback to " .. tostring(selected.name) .. " after failure")
+    if lowerIndex >= 1 then
+      local lowerTier = ASSET_TIER_ORDER[lowerIndex]
+      if tierMap[lowerTier] and not seen[lowerTier] then
+        order[#order + 1] = lowerTier
+        seen[lowerTier] = true
       end
-      appendUiRuntimeLog("asset " .. tostring(kindLabel) .. ": selected " .. tostring(selected.name) .. " (" .. tostring(selected.width) .. "x" .. tostring(selected.height) .. ")")
-      return selected, sawVramError, usedFallback
     end
 
-    if isVramError(err) then
-      sawVramError = true
-      appendUiRuntimeLog("asset " .. tostring(kindLabel) .. ": VRAM error on " .. tostring(variant.name) .. " -> " .. tostring(err))
-    else
-      appendUiRuntimeLog("asset " .. tostring(kindLabel) .. ": decode error on " .. tostring(variant.name) .. " -> " .. tostring(err))
+    if delta > 0 and higherIndex <= #ASSET_TIER_ORDER then
+      local higherTier = ASSET_TIER_ORDER[higherIndex]
+      if tierMap[higherTier] and not seen[higherTier] then
+        order[#order + 1] = higherTier
+        seen[higherTier] = true
+      end
     end
   end
 
-  appendUiRuntimeLog("asset " .. tostring(kindLabel) .. ": disabled (no variant loadable)")
-  return nil, sawVramError, usedFallback
+  return order
+end
+
+local function classifyAssetError(err)
+  local low = string.lower(compactError(err))
+  if string.find(low, "fichier absent", 1, true) or string.find(low, "not found", 1, true) then
+    return "file_missing"
+  end
+  if isVramError(low) then
+    return "vram_alloc_failed"
+  end
+  if string.find(low, "decode", 1, true) or string.find(low, "invalid", 1, true) then
+    return "decode_failed"
+  end
+  return "decode_failed"
+end
+
+local function logAssetLoadFailure(kindLabel, variant, err)
+  local classified = classifyAssetError(err)
+  appendUiRuntimeLog(
+    "asset " .. tostring(kindLabel)
+      .. ": load failed variant=" .. tostring(variant.name)
+      .. " tier=" .. tostring(variant.tier)
+      .. " class=" .. tostring(classified)
+      .. " detail=" .. compactError(err)
+  )
+
+  if classified == "vram_alloc_failed" then
+    appendUiRuntimeLog("asset " .. tostring(kindLabel) .. ": variant_too_large probable for " .. tostring(variant.name))
+  end
+
+  return classified
+end
+
+local function tryDecodeVariant(kindLabel, variant)
+  local img, err = loadPng(variant.path)
+  if img then
+    return {
+      name = variant.name,
+      path = variant.path,
+      tier = variant.tier,
+      image = img,
+      width = img.getWidth(),
+      height = img.getHeight(),
+    }, nil
+  end
+
+  return nil, logAssetLoadFailure(kindLabel, variant, err)
+end
+
+local function loadScenePair(preferredTier)
+  local reactorVariants = normalizeAssetVariants(ASSET_REACTOR_VARIANTS, "reactor")
+  local moduleVariants = normalizeAssetVariants(ASSET_LASER_MODULE_VARIANTS, "laser_module")
+  local reactorByTier = buildTierVariantMap(reactorVariants, "reactor")
+  local moduleByTier = buildTierVariantMap(moduleVariants, "laser_module")
+
+  local hasReactorTier = false
+  local hasModuleTier = false
+  for _, tier in ipairs(ASSET_TIER_ORDER) do
+    if reactorByTier[tier] and #reactorByTier[tier] > 0 then
+      hasReactorTier = true
+    end
+    if moduleByTier[tier] and #moduleByTier[tier] > 0 then
+      hasModuleTier = true
+    end
+  end
+
+  if not hasReactorTier then
+    appendUiRuntimeLog("asset scene: no reactor tier available")
+    return nil, "no_reactor_tier_available"
+  end
+  if not hasModuleTier then
+    appendUiRuntimeLog("asset scene: no laser module tier available")
+    return nil, "no_module_tier_available"
+  end
+
+  local sceneTierOrder = buildTierFallbackOrder(preferredTier)
+  appendUiRuntimeLog("asset scene: preferred tier=" .. tostring(preferredTier))
+
+  local sawVramError = false
+
+  for _, reactorTier in ipairs(sceneTierOrder) do
+    local reactorList = reactorByTier[reactorTier]
+    if reactorList and #reactorList > 0 then
+      appendUiRuntimeLog("asset scene: try reactor tier=" .. tostring(reactorTier) .. " variants=" .. tostring(#reactorList))
+
+      for _, reactorVariant in ipairs(reactorList) do
+        local reactorSelected, reactorErrClass = tryDecodeVariant("reactor", reactorVariant)
+        if reactorSelected then
+          local moduleTierOrder = buildNearestTierOrder(reactorTier, moduleByTier)
+          appendUiRuntimeLog("asset scene: reactor " .. tostring(reactorSelected.name) .. " loaded, module tier candidates=" .. tostring(#moduleTierOrder))
+
+          for _, moduleTier in ipairs(moduleTierOrder) do
+            local moduleList = moduleByTier[moduleTier]
+            if moduleList and #moduleList > 0 then
+              for _, moduleVariant in ipairs(moduleList) do
+                local moduleSelected, moduleErrClass = tryDecodeVariant("laser_module", moduleVariant)
+                if moduleSelected then
+                  local usedFallback = (reactorTier ~= preferredTier) or (moduleTier ~= reactorTier)
+                  if moduleTier ~= reactorTier then
+                    appendUiRuntimeLog("asset scene: module exact tier missing, nearest used reactorTier=" .. tostring(reactorTier) .. " moduleTier=" .. tostring(moduleTier))
+                  end
+
+                  return {
+                    reactor = reactorSelected,
+                    module = moduleSelected,
+                    reactorTier = reactorTier,
+                    moduleTier = moduleTier,
+                    requestedTier = preferredTier,
+                    usedFallback = usedFallback,
+                    sawVramError = sawVramError,
+                  }, nil
+                end
+
+                if moduleErrClass == "vram_alloc_failed" then
+                  sawVramError = true
+                end
+              end
+            end
+          end
+
+          appendUiRuntimeLog("asset scene: no module fallback available for reactor variant " .. tostring(reactorVariant.name))
+          reactorSelected = nil
+          pcall(collectgarbage, "collect")
+        elseif reactorErrClass == "vram_alloc_failed" then
+          sawVramError = true
+        end
+      end
+    end
+  end
+
+  appendUiRuntimeLog("asset scene: no fallback available across tiers")
+  return nil, sawVramError and "no_scene_pair_vram" or "no_scene_pair_available"
 end
 
 local function refreshVisualEffectLevel()
@@ -696,44 +871,63 @@ end
 
 local function tryLoadAssets(reason)
   reason = tostring(reason or "manual")
-  appendUiRuntimeLog("asset reload start: reason=" .. reason .. ", screen=" .. tostring(ui and (ui.sw .. "x" .. ui.sh) or "n/a"))
+  local screen = tostring(ui and (ui.sw .. "x" .. ui.sh) or "n/a")
+  local hadPreviousReactor = (#images.reactorVariants > 0) or (images.reactor ~= nil)
+  local hadPreviousModule = (#images.laserModuleVariants > 0) or (images.laserModule ~= nil)
+  local hadPreviousScene = hadPreviousReactor and hadPreviousModule
+  local previousReactor = hadPreviousReactor and tostring(state.visual.reactorAsset or "runtime") or "none"
+  local previousModule = hadPreviousModule and tostring(state.visual.moduleAsset or "runtime") or "none"
+  local requestedTier = preferredSceneTier()
 
-  images.reactorVariants = {}
-  images.reactor = nil
-  images.laserModuleVariants = {}
-  images.laserModule = nil
-  pcall(collectgarbage, "collect")
-
-  local reactorVariant, reactorVramError = loadVariantWithFallback(
-    "reactor",
-    ASSET_REACTOR_VARIANTS,
-    preferredReactorVariantName()
+  appendUiRuntimeLog(
+    "asset reload start: reason=" .. reason
+      .. ", screen=" .. screen
+      .. ", requestedTier=" .. tostring(requestedTier)
+      .. ", previousPair=" .. tostring(previousReactor) .. "/" .. tostring(previousModule)
   )
-  if reactorVariant then
-    images.reactorVariants = { reactorVariant }
-    images.reactor = reactorVariant.image
+
+  local pair, loadErr = loadScenePair(requestedTier)
+  if pair and pair.reactor and pair.module then
+    -- Atomic swap: only replace active assets once both parts are ready.
+    images.reactorVariants = { pair.reactor }
+    images.reactor = pair.reactor.image
+    images.laserModuleVariants = { pair.module }
+    images.laserModule = pair.module.image
+
+    state.visual.reactorAsset = pair.reactor.name
+    state.visual.moduleAsset = pair.module.name
+    state.visual.vramFallback = pair.sawVramError or pair.usedFallback
+    state.visual.lastAssetReason = reason
+
+    appendUiRuntimeLog(
+      "asset reload applied: reactor=" .. tostring(pair.reactor.name)
+        .. " module=" .. tostring(pair.module.name)
+        .. " reactorTier=" .. tostring(pair.reactorTier)
+        .. " moduleTier=" .. tostring(pair.moduleTier)
+        .. " fallback=" .. tostring(pair.usedFallback)
+    )
   else
-    images.reactorVariants = {}
-    images.reactor = nil
+    if hadPreviousScene then
+      appendUiRuntimeLog(
+        "asset reload failed, preserving previous valid pair: "
+          .. tostring(previousReactor) .. "/" .. tostring(previousModule)
+          .. " reason=" .. tostring(loadErr)
+      )
+      state.visual.vramFallback = true
+      state.visual.lastAssetReason = reason .. ":preserve_previous"
+    else
+      appendUiRuntimeLog("asset reload failed: no previous valid pair available, placeholder may be shown (reason=" .. tostring(loadErr) .. ")")
+      images.reactorVariants = {}
+      images.reactor = nil
+      images.laserModuleVariants = {}
+      images.laserModule = nil
+      state.visual.reactorAsset = "none"
+      state.visual.moduleAsset = "none"
+      state.visual.vramFallback = true
+      state.visual.lastAssetReason = reason .. ":no_pair"
+    end
   end
 
-  local moduleVariant, moduleVramError = loadVariantWithFallback(
-    "laser_module",
-    ASSET_LASER_MODULE_VARIANTS,
-    preferredModuleVariantName()
-  )
-  if moduleVariant then
-    images.laserModuleVariants = { moduleVariant }
-    images.laserModule = moduleVariant.image
-  else
-    images.laserModuleVariants = {}
-    images.laserModule = nil
-  end
-
-  state.visual.reactorAsset = reactorVariant and reactorVariant.name or "none"
-  state.visual.moduleAsset = moduleVariant and moduleVariant.name or "none"
-  state.visual.vramFallback = reactorVramError or moduleVramError
-  state.visual.lastAssetReason = reason
   refreshVisualEffectLevel()
   pcall(collectgarbage, "collect")
 end
