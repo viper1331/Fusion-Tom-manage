@@ -53,6 +53,7 @@ local DEFAULTS = {
     branch = "main",
     manifestPath = "fusion.manifest.json",
     rawBaseUrl = "",
+    integrityMode = "size+hash",
     requireConfirmApply = true,
     autoCheckOnStartup = false,
   },
@@ -84,6 +85,14 @@ end
 
 local function resolveConfiguredGpuName(configuredName)
   return nonEmptyString(configuredName) or DEFAULTS.devices.gpu
+end
+
+local function normalizeIntegrityMode(value)
+  local raw = string.lower(nonEmptyString(value) or "")
+  if raw == "size-only" or raw == "size_only" or raw == "sizeonly" then
+    return "size-only"
+  end
+  return "size+hash"
 end
 
 local GPU_MODE = DEFAULTS.runtime.gpuMode
@@ -134,6 +143,7 @@ local UPDATE_STATUS = {
   DOWNLOADING = "DOWNLOADING",
   VALIDATING = "VALIDATING",
   DOWNLOAD_FAILED = "DOWNLOAD FAILED",
+  VALIDATION_FAILED = "VALIDATION FAILED",
   READY_TO_APPLY = "READY TO APPLY",
   APPLYING = "APPLYING",
   APPLY_FAILED = "APPLY FAILED",
@@ -219,6 +229,9 @@ local function loadExternalConfig()
     if type(cfg.update.rawBaseUrl) == "string" then
       UPDATE_CFG.rawBaseUrl = cfg.update.rawBaseUrl
     end
+    if type(cfg.update.integrityMode) == "string" and cfg.update.integrityMode ~= "" then
+      UPDATE_CFG.integrityMode = normalizeIntegrityMode(cfg.update.integrityMode)
+    end
     if type(cfg.update.requireConfirmApply) == "boolean" then
       UPDATE_CFG.requireConfirmApply = cfg.update.requireConfirmApply
     end
@@ -256,6 +269,7 @@ local function loadExternalConfig()
 end
 
 loadExternalConfig()
+UPDATE_CFG.integrityMode = normalizeIntegrityMode(UPDATE_CFG.integrityMode)
 
 local function initGpuFromConfig()
   local configuredGpuName = resolveConfiguredGpuName(DEVICES.gpu)
@@ -324,6 +338,9 @@ local state = {
     remoteStatus = UPDATE_STATUS.IDLE,
     statusDetail = "waiting for check",
     statusAt = "never",
+    integrityMode = UPDATE_CFG.integrityMode,
+    hashValidationRequired = true,
+    hashValidated = false,
     filesToUpdate = 0,
     downloadedFiles = 0,
     lastCheck = "never",
@@ -353,6 +370,17 @@ local state = {
       percent = 0,
       note = "idle",
     },
+    validationProgress = {
+      phase = UPDATE_STATUS.IDLE,
+      totalFiles = 0,
+      completedFiles = 0,
+      totalBytesExpected = 0,
+      totalBytesCompleted = 0,
+      currentFile = "-",
+      currentFileSize = 0,
+      percent = 0,
+      note = "idle",
+    },
   },
 
   live = {
@@ -367,6 +395,10 @@ local state = {
     },
   },
 }
+
+state.update.integrityMode = normalizeIntegrityMode(state.update.integrityMode or UPDATE_CFG.integrityMode)
+state.update.hashValidationRequired = state.update.integrityMode ~= "size-only"
+state.update.hashValidated = not state.update.hashValidationRequired
 
 local images = {
   reactor = nil,
@@ -1021,7 +1053,12 @@ local function updateStatusColor(status)
   if status == UPDATE_STATUS.ROLLBACK_DONE then
     return C.yellow
   end
-  if status == UPDATE_STATUS.CHECK_FAILED or status == UPDATE_STATUS.DOWNLOAD_FAILED or status == UPDATE_STATUS.APPLY_FAILED or status == UPDATE_STATUS.ROLLBACK_FAILED then
+  if status == UPDATE_STATUS.CHECK_FAILED
+    or status == UPDATE_STATUS.DOWNLOAD_FAILED
+    or status == UPDATE_STATUS.VALIDATION_FAILED
+    or status == UPDATE_STATUS.APPLY_FAILED
+    or status == UPDATE_STATUS.ROLLBACK_FAILED
+  then
     return C.red
   end
   return C.muted
@@ -1040,6 +1077,7 @@ local function setDownloadedState(flag, count)
   state.update.downloaded = flag == true
   state.update.downloadedFiles = state.update.downloaded and math.max(0, math.floor(count or 0)) or 0
   if not state.update.downloaded then
+    state.update.hashValidated = false
     state.update.applyConfirmArmed = false
   end
 end
@@ -1098,6 +1136,71 @@ end
 
 local function resetDownloadProgress(phase, note)
   setDownloadProgress({
+    phase = phase or UPDATE_STATUS.IDLE,
+    totalFiles = 0,
+    completedFiles = 0,
+    totalBytesExpected = 0,
+    totalBytesCompleted = 0,
+    currentFile = "-",
+    currentFileSize = 0,
+    note = note or "idle",
+  })
+end
+
+local function setValidationProgress(progress)
+  if type(state.update.validationProgress) ~= "table" then
+    state.update.validationProgress = {}
+  end
+
+  local current = state.update.validationProgress
+  if type(progress) == "table" then
+    if type(progress.phase) == "string" and progress.phase ~= "" then
+      current.phase = progress.phase
+    end
+    if type(progress.totalFiles) == "number" then
+      current.totalFiles = math.max(0, math.floor(progress.totalFiles))
+    end
+    if type(progress.completedFiles) == "number" then
+      current.completedFiles = math.max(0, math.floor(progress.completedFiles))
+    end
+    if type(progress.totalBytesExpected) == "number" then
+      current.totalBytesExpected = math.max(0, math.floor(progress.totalBytesExpected))
+    end
+    if type(progress.totalBytesCompleted) == "number" then
+      current.totalBytesCompleted = math.max(0, math.floor(progress.totalBytesCompleted))
+    end
+    if type(progress.currentFile) == "string" and progress.currentFile ~= "" then
+      current.currentFile = progress.currentFile
+    end
+    if type(progress.currentFileSize) == "number" then
+      current.currentFileSize = math.max(0, math.floor(progress.currentFileSize))
+    end
+    if type(progress.note) == "string" and progress.note ~= "" then
+      current.note = firstLine(progress.note)
+    end
+  end
+
+  current.phase = current.phase or UPDATE_STATUS.IDLE
+  current.totalFiles = math.max(0, math.floor(current.totalFiles or 0))
+  current.completedFiles = math.max(0, math.floor(current.completedFiles or 0))
+  current.totalBytesExpected = math.max(0, math.floor(current.totalBytesExpected or 0))
+  current.totalBytesCompleted = math.max(0, math.floor(current.totalBytesCompleted or 0))
+  current.currentFile = current.currentFile or "-"
+  current.currentFileSize = math.max(0, math.floor(current.currentFileSize or 0))
+  current.note = current.note or "idle"
+
+  local percent = 0
+  if current.totalBytesExpected > 0 then
+    percent = (current.totalBytesCompleted * 100) / current.totalBytesExpected
+  elseif current.totalFiles > 0 then
+    percent = (current.completedFiles * 100) / current.totalFiles
+  end
+
+  current.percent = round(clamp(percent, 0, 100), 1)
+end
+
+local function resetValidationProgress(phase, note)
+  setValidationProgress({
     phase = phase or UPDATE_STATUS.IDLE,
     totalFiles = 0,
     completedFiles = 0,
@@ -1239,6 +1342,9 @@ local function formatUpdateUserError(step, err)
   if string.find(lower, "staging", 1, true) then
     return step .. ": staging is invalid or incomplete. Run DOWNLOAD again."
   end
+  if string.find(lower, "hash validation required before apply", 1, true) then
+    return step .. ": hash validation not complete. Run DOWNLOAD and wait for VALIDATING."
+  end
   if string.find(lower, "hash mismatch", 1, true) then
     local path, expected, received, algo = parseHashMismatchDetail(raw)
     if path and expected and received then
@@ -1272,10 +1378,17 @@ local function failUpdateStep(step, status, err)
   local userMessage = formatUpdateUserError(step, err)
   state.update.lastError = userMessage
   state.update.lastCheckSummary = string.lower(step) .. " failed"
+  state.update.hashValidated = false
   setIntegrityFromError(err)
   if step == "DOWNLOAD" then
     setDownloadProgress({
       phase = UPDATE_STATUS.DOWNLOAD_FAILED,
+      note = userMessage,
+    })
+    resetValidationProgress(UPDATE_STATUS.IDLE, "download failed")
+  elseif step == "VALIDATION" then
+    setValidationProgress({
+      phase = UPDATE_STATUS.VALIDATION_FAILED,
       note = userMessage,
     })
   end
@@ -1411,10 +1524,17 @@ local function refreshLocalUpdateSnapshot()
 end
 
 local function performUpdateCheck(reason)
+  local integrityMode = normalizeIntegrityMode(UPDATE_CFG.integrityMode)
+  local hashValidationRequired = integrityMode ~= "size-only"
+
   state.update.applyConfirmArmed = false
   state.update.lastCheck = nowText()
+  state.update.integrityMode = integrityMode
+  state.update.hashValidationRequired = hashValidationRequired
   setDownloadedState(false, 0)
+  state.update.hashValidated = not hashValidationRequired
   resetDownloadProgress(UPDATE_STATUS.IDLE, "check reset")
+  resetValidationProgress(UPDATE_STATUS.IDLE, hashValidationRequired and "hash validation pending" or "size-only mode")
   setIntegrityStatus(INTEGRITY_STATUS.PENDING, "manifest validation pending", false)
   state.update.remoteCommit = "n/a"
   state.update.remoteBranch = tostring(UPDATE_CFG.branch or "main")
@@ -1452,7 +1572,9 @@ local function performUpdateCheck(reason)
     return failUpdateStep("CHECK", UPDATE_STATUS.CHECK_FAILED, remoteSourceErr)
   end
 
-  local manifestReady, manifestCommitOrErr = UpdateManifest.validateDownloadManifest(remoteManifest)
+  local manifestReady, manifestCommitOrErr = UpdateManifest.validateDownloadManifest(remoteManifest, {
+    integrityMode = integrityMode,
+  })
   if manifestReady then
     remoteSource.commit = manifestCommitOrErr
     state.update.remoteCommit = manifestCommitOrErr
@@ -1469,7 +1591,8 @@ local function performUpdateCheck(reason)
   state.update.remoteBranch = tostring(remoteSource.branch ~= "" and remoteSource.branch or state.update.remoteBranch)
   appendUpdateLogLine("CHECK mode: manifest via branch, files pinned by commit")
   appendUpdateLogLine("CHECK session branch=" .. tostring(state.update.remoteBranch) .. ", commit=" .. tostring(state.update.remoteCommit))
-  appendUpdateLogLine("CHECK integrity mode: " .. tostring(remoteManifest.integrity and remoteManifest.integrity.mode or "size"))
+  appendUpdateLogLine("CHECK integrity mode: config=" .. tostring(integrityMode)
+    .. ", manifest=" .. tostring(remoteManifest.integrity and remoteManifest.integrity.mode or "hash+size"))
   state.update.pendingFiles = UpdateManifest.computePendingFiles(state.update.localManifest, remoteManifest)
   state.update.filesToUpdate = #state.update.pendingFiles
   setDownloadProgress({
@@ -1482,13 +1605,25 @@ local function performUpdateCheck(reason)
     currentFileSize = 0,
     note = state.update.filesToUpdate > 0 and "update files pending download" or "no pending files",
   })
+  setValidationProgress({
+    phase = state.update.filesToUpdate > 0 and UPDATE_STATUS.IDLE or UPDATE_STATUS.UP_TO_DATE,
+    totalFiles = state.update.filesToUpdate,
+    completedFiles = 0,
+    totalBytesExpected = sumManifestEntrySizes(state.update.pendingFiles),
+    totalBytesCompleted = 0,
+    currentFile = "-",
+    currentFileSize = 0,
+    note = hashValidationRequired and (state.update.filesToUpdate > 0 and "waiting for hash validation" or "nothing to validate")
+      or "size-only mode (hash skipped)",
+  })
   state.update.lastError = manifestReady and "none" or formatUpdateUserError("CHECK", manifestCommitOrErr)
   setDownloadedState(false, 0)
+  state.update.hashValidated = (not hashValidationRequired) or state.update.filesToUpdate == 0
   if manifestReady then
     if state.update.filesToUpdate > 0 then
-      setIntegrityStatus(INTEGRITY_STATUS.PENDING, "manifest hash/size valid; download validation pending", true)
+      setIntegrityStatus(INTEGRITY_STATUS.PENDING, hashValidationRequired and "manifest valid; download + hash validation pending" or "manifest valid; size-only validation pending", true)
     else
-      setIntegrityStatus(INTEGRITY_STATUS.OK, "manifest hash/size valid (up to date)", true)
+      setIntegrityStatus(INTEGRITY_STATUS.OK, hashValidationRequired and "manifest hash/size valid (up to date)" or "manifest size valid (size-only mode, up to date)", true)
     end
   else
     setIntegrityStatus(INTEGRITY_STATUS.STAGING_INVALID, firstLine(manifestCommitOrErr), true)
@@ -1531,10 +1666,17 @@ local function performUpdateCheck(reason)
 end
 
 local function performUpdateDownload()
+  local integrityMode = normalizeIntegrityMode(state.update.integrityMode or UPDATE_CFG.integrityMode)
+  local hashValidationRequired = integrityMode ~= "size-only"
+
+  state.update.integrityMode = integrityMode
+  state.update.hashValidationRequired = hashValidationRequired
   state.update.applyConfirmArmed = false
-  setIntegrityStatus(INTEGRITY_STATUS.PENDING, "download + hash validation in progress", true)
+  setDownloadedState(false, 0)
+  setIntegrityStatus(INTEGRITY_STATUS.PENDING, hashValidationRequired and "download + hash validation in progress" or "download in progress (size-only mode)", true)
   setUpdateStatus(UPDATE_STATUS.DOWNLOADING, "preparing staging directory", true)
   resetDownloadProgress(UPDATE_STATUS.DOWNLOADING, "preparing staging directory")
+  resetValidationProgress(UPDATE_STATUS.IDLE, hashValidationRequired and "waiting for download completion" or "size-only mode")
   appendUpdateLogLine("DOWNLOAD start")
 
   if not state.update.remoteManifest then
@@ -1545,7 +1687,9 @@ local function performUpdateDownload()
   end
 
   local remoteManifest = state.update.remoteManifest
-  local manifestReady, manifestCommitOrErr = UpdateManifest.validateDownloadManifest(remoteManifest)
+  local manifestReady, manifestCommitOrErr = UpdateManifest.validateDownloadManifest(remoteManifest, {
+    integrityMode = integrityMode,
+  })
   if not manifestReady then
     clearStagingWithLog("manifest invalid for download")
     setDownloadedState(false, 0)
@@ -1559,6 +1703,7 @@ local function performUpdateDownload()
   state.update.remoteSource = remoteSource
   state.update.remoteBranch = tostring(remoteSource.branch ~= "" and remoteSource.branch or UPDATE_CFG.branch or "main")
   appendUpdateLogLine("DOWNLOAD mode: manifest branch=" .. tostring(state.update.remoteBranch) .. ", files commit=" .. tostring(manifestCommit))
+  appendUpdateLogLine("DOWNLOAD integrity mode: " .. tostring(integrityMode))
 
   local sourceOk, sourceErr = validateUpdateSource(remoteSource, true)
   if not sourceOk then
@@ -1629,17 +1774,14 @@ local function performUpdateDownload()
     if event.event == "file_start" then
       setUpdateStatus(UPDATE_STATUS.DOWNLOADING, "downloading " .. tostring(currentPath) .. " (" .. progressSummary .. ")", false)
       appendUpdateLogLine("DOWNLOAD file start: " .. tostring(currentPath) .. " expected=" .. tostring(currentFileSize) .. "B url=" .. tostring(event.url or "n/a"))
-    elseif event.event == "file_validating" then
-      setUpdateStatus(UPDATE_STATUS.VALIDATING, "validating " .. tostring(currentPath), false)
-      appendUpdateLogLine("DOWNLOAD file validating: " .. tostring(currentPath) .. " expected=" .. tostring(event.expectedSize or "?") .. "B received=" .. tostring(event.receivedSize or "?") .. "B")
     elseif event.event == "file_done" then
       setUpdateStatus(UPDATE_STATUS.DOWNLOADING, "downloaded " .. tostring(progressSummary), false)
       appendUpdateLogLine("DOWNLOAD progress: " .. tostring(progressSummary))
     elseif event.event == "complete" then
-      setUpdateStatus(UPDATE_STATUS.VALIDATING, "download complete, validating staging", false)
+      setUpdateStatus(UPDATE_STATUS.DOWNLOADING, "download transfer complete", false)
       setDownloadProgress({
-        phase = UPDATE_STATUS.VALIDATING,
-        note = "download complete, validating staging",
+        phase = UPDATE_STATUS.DOWNLOADING,
+        note = "download transfer complete",
       })
       appendUpdateLogLine("DOWNLOAD transfer complete: " .. tostring(progressSummary))
     end
@@ -1652,10 +1794,105 @@ local function performUpdateDownload()
     return failUpdateStep("DOWNLOAD", UPDATE_STATUS.DOWNLOAD_FAILED, downloadErr)
   end
 
+  if hashValidationRequired then
+    setUpdateStatus(UPDATE_STATUS.VALIDATING, "hash validation in progress", true)
+    resetValidationProgress(UPDATE_STATUS.VALIDATING, "hash validation started")
+    setValidationProgress({
+      phase = UPDATE_STATUS.VALIDATING,
+      totalFiles = totalFiles,
+      completedFiles = 0,
+      totalBytesExpected = totalExpectedBytes,
+      totalBytesCompleted = 0,
+      currentFile = "-",
+      currentFileSize = 0,
+      note = "hash validation started",
+    })
+    appendUpdateLogLine("VALIDATION start: files=" .. tostring(totalFiles) .. ", expectedBytes=" .. tostring(totalExpectedBytes))
+
+    local function onValidationProgress(event)
+      if type(event) ~= "table" then
+        return
+      end
+
+      local totalFilesEvent = type(event.totalFiles) == "number" and event.totalFiles or state.update.validationProgress.totalFiles
+      local completedFilesEvent = type(event.completedFiles) == "number" and event.completedFiles or state.update.validationProgress.completedFiles
+      local totalBytesExpectedEvent = type(event.totalBytesExpected) == "number" and event.totalBytesExpected or state.update.validationProgress.totalBytesExpected
+      local totalBytesCompletedEvent = type(event.totalBytesCompleted) == "number" and event.totalBytesCompleted or state.update.validationProgress.totalBytesCompleted
+      local currentPath = type(event.path) == "string" and event.path ~= "" and event.path or state.update.validationProgress.currentFile
+      local currentFileSize = 0
+      if type(event.expectedSize) == "number" then
+        currentFileSize = math.max(0, math.floor(event.expectedSize))
+      elseif type(event.receivedSize) == "number" then
+        currentFileSize = math.max(0, math.floor(event.receivedSize))
+      else
+        currentFileSize = state.update.validationProgress.currentFileSize or 0
+      end
+
+      setValidationProgress({
+        phase = UPDATE_STATUS.VALIDATING,
+        totalFiles = totalFilesEvent,
+        completedFiles = completedFilesEvent,
+        totalBytesExpected = totalBytesExpectedEvent,
+        totalBytesCompleted = totalBytesCompletedEvent,
+        currentFile = currentPath,
+        currentFileSize = currentFileSize,
+        note = type(event.event) == "string" and event.event or state.update.validationProgress.note,
+      })
+
+      local percent = math.floor((state.update.validationProgress.percent or 0) + 0.5)
+      local progressSummary = tostring(state.update.validationProgress.completedFiles or 0) .. "/" .. tostring(state.update.validationProgress.totalFiles or 0)
+        .. " files, " .. tostring(state.update.validationProgress.totalBytesCompleted or 0) .. "/" .. tostring(state.update.validationProgress.totalBytesExpected or 0)
+        .. " bytes (" .. tostring(percent) .. "%)"
+
+      if event.event == "file_start" then
+        setUpdateStatus(UPDATE_STATUS.VALIDATING, "validating hash " .. tostring(currentPath), false)
+        appendUpdateLogLine("VALIDATION file start: " .. tostring(currentPath) .. " expected=" .. tostring(currentFileSize) .. "B")
+      elseif event.event == "file_done" then
+        setUpdateStatus(UPDATE_STATUS.VALIDATING, "validated " .. tostring(progressSummary), false)
+        appendUpdateLogLine("VALIDATION progress: " .. tostring(progressSummary))
+      elseif event.event == "complete" then
+        appendUpdateLogLine("VALIDATION transfer complete: " .. tostring(progressSummary))
+      end
+    end
+
+    local validated, validationErr = UpdateClient.validateDownloadedHashes(remoteSource, plannedFiles, UPDATE_TEMP_DIR, appendUpdateLogLine, onValidationProgress)
+    if not validated then
+      clearStagingWithLog("hash validation failure")
+      setDownloadedState(false, 0)
+      return failUpdateStep("VALIDATION", UPDATE_STATUS.VALIDATION_FAILED, validationErr)
+    end
+
+    state.update.hashValidated = true
+    setValidationProgress({
+      phase = UPDATE_STATUS.READY_TO_APPLY,
+      completedFiles = totalFiles,
+      totalFiles = totalFiles,
+      totalBytesCompleted = totalExpectedBytes,
+      totalBytesExpected = totalExpectedBytes,
+      currentFile = "-",
+      currentFileSize = 0,
+      note = "hash validation complete",
+    })
+    appendUpdateLogLine("VALIDATION done: files=" .. tostring(totalFiles))
+  else
+    state.update.hashValidated = true
+    setValidationProgress({
+      phase = UPDATE_STATUS.READY_TO_APPLY,
+      totalFiles = totalFiles,
+      completedFiles = totalFiles,
+      totalBytesExpected = totalExpectedBytes,
+      totalBytesCompleted = totalExpectedBytes,
+      currentFile = "-",
+      currentFileSize = 0,
+      note = "size-only mode: hash validation skipped",
+    })
+    appendUpdateLogLine("VALIDATION skipped: size-only mode enabled")
+  end
+
   setUpdateStatus(UPDATE_STATUS.VALIDATING, "finalizing staging metadata", true)
   setDownloadProgress({
-    phase = UPDATE_STATUS.VALIDATING,
-    note = "finalizing staging metadata",
+    phase = UPDATE_STATUS.DOWNLOADING,
+    note = "download complete, staging finalize",
   })
 
   local stagingContext = {
@@ -1664,6 +1901,7 @@ local function performUpdateDownload()
     remoteCommit = tostring(manifestCommit or ""),
     channel = tostring(state.update.channel or "stable"),
     checkedAt = tostring(state.update.lastCheck or "never"),
+    integrityMode = integrityMode,
   }
 
   local marked, markedErr = UpdateApply.markStagingReady(remoteManifest.files, UPDATE_TEMP_DIR, stagingContext)
@@ -1673,14 +1911,20 @@ local function performUpdateDownload()
     return failUpdateStep("DOWNLOAD", UPDATE_STATUS.DOWNLOAD_FAILED, markedErr)
   end
 
-  local valid, validErr = UpdateApply.validateStaging(remoteManifest.files, UPDATE_TEMP_DIR, stagingContext, appendUpdateLogLine, "download validation")
+  local valid, validErr = UpdateApply.validateStaging(remoteManifest.files, UPDATE_TEMP_DIR, stagingContext, appendUpdateLogLine, "download staging validation", {
+    skipHash = true,
+  })
   if not valid then
     clearStagingWithLog("staging validation failure")
     setDownloadedState(false, 0)
     return failUpdateStep("DOWNLOAD", UPDATE_STATUS.DOWNLOAD_FAILED, validErr)
   end
 
-  setIntegrityStatus(INTEGRITY_STATUS.OK, "staging integrity validated for commit " .. tostring(shortCommit(manifestCommit, 8)), true)
+  if hashValidationRequired then
+    setIntegrityStatus(INTEGRITY_STATUS.OK, "download + hash validation complete for commit " .. tostring(shortCommit(manifestCommit, 8)), true)
+  else
+    setIntegrityStatus(INTEGRITY_STATUS.OK, "download size validation complete (size-only mode) for commit " .. tostring(shortCommit(manifestCommit, 8)), true)
+  end
   setDownloadedState(true, #downloaded)
   setDownloadProgress({
     phase = UPDATE_STATUS.READY_TO_APPLY,
@@ -1691,11 +1935,17 @@ local function performUpdateDownload()
     currentFileSize = 0,
     note = "ready to apply",
   })
+  setValidationProgress({
+    phase = UPDATE_STATUS.READY_TO_APPLY,
+    currentFile = "-",
+    currentFileSize = 0,
+    note = hashValidationRequired and "ready to apply (hash validated)" or "ready to apply (size-only mode)",
+  })
   state.update.lastDownload = nowText()
   state.update.lastError = "none"
   state.update.lastCheckSummary = "ready to apply"
-  setUpdateStatus(UPDATE_STATUS.READY_TO_APPLY, "downloaded files=" .. tostring(#downloaded) .. " commit=" .. tostring(shortCommit(manifestCommit, 8)), true)
-  appendUpdateLogLine("DOWNLOAD done: files=" .. tostring(#downloaded) .. ", commit=" .. tostring(manifestCommit))
+  setUpdateStatus(UPDATE_STATUS.READY_TO_APPLY, "downloaded files=" .. tostring(#downloaded) .. " commit=" .. tostring(shortCommit(manifestCommit, 8)) .. " mode=" .. tostring(integrityMode), true)
+  appendUpdateLogLine("DOWNLOAD done: files=" .. tostring(#downloaded) .. ", commit=" .. tostring(manifestCommit) .. ", mode=" .. tostring(integrityMode))
 
   return true, "ready to apply (" .. tostring(#downloaded) .. " files)"
 end
@@ -1722,19 +1972,32 @@ local function performUpdateApply()
     return failUpdateStep("APPLY", UPDATE_STATUS.APPLY_FAILED, "download required before apply")
   end
 
+  local integrityMode = normalizeIntegrityMode(state.update.integrityMode or UPDATE_CFG.integrityMode)
+  local hashValidationRequired = state.update.hashValidationRequired ~= false and integrityMode ~= "size-only"
+  if hashValidationRequired and state.update.hashValidated ~= true then
+    return failUpdateStep("APPLY", UPDATE_STATUS.APPLY_FAILED, "hash validation required before apply")
+  end
+
   local expectedContext = {
     remoteVersion = tostring(state.update.remoteVersion or "n/a"),
     manifestVersion = tostring(remoteManifest.version or "n/a"),
     remoteCommit = tostring(state.update.remoteCommit or ""),
+    integrityMode = integrityMode,
   }
 
-  local stageOk, stageErr = UpdateApply.validateStaging(remoteManifest.files, UPDATE_TEMP_DIR, expectedContext, appendUpdateLogLine, "pre-apply validation")
+  local stageOk, stageErr = UpdateApply.validateStaging(remoteManifest.files, UPDATE_TEMP_DIR, expectedContext, appendUpdateLogLine, "pre-apply validation", {
+    skipHash = not hashValidationRequired,
+  })
   if not stageOk then
     clearStagingWithLog("apply refused invalid staging")
     setDownloadedState(false, 0)
     return failUpdateStep("APPLY", UPDATE_STATUS.APPLY_FAILED, stageErr)
   end
-  setIntegrityStatus(INTEGRITY_STATUS.OK, "pre-apply staging integrity validated", true)
+  if hashValidationRequired then
+    setIntegrityStatus(INTEGRITY_STATUS.OK, "pre-apply staging hash+size validation OK", true)
+  else
+    setIntegrityStatus(INTEGRITY_STATUS.OK, "pre-apply staging size validation OK (size-only mode)", true)
+  end
 
   local context = {
     previousVersion = state.update.localVersion,
@@ -1747,7 +2010,9 @@ local function performUpdateApply()
     return failUpdateStep("APPLY", UPDATE_STATUS.APPLY_FAILED, backupErr)
   end
 
-  local applied, applyErr = UpdateApply.applyFromStaging(remoteManifest.files, UPDATE_TEMP_DIR, appendUpdateLogLine)
+  local applied, applyErr = UpdateApply.applyFromStaging(remoteManifest.files, UPDATE_TEMP_DIR, appendUpdateLogLine, {
+    skipHash = not hashValidationRequired,
+  })
   if not applied then
     setIntegrityFromError(applyErr)
     setUpdateStatus(UPDATE_STATUS.APPLY_FAILED, "apply failed, rollback attempt started", true)
@@ -1781,6 +2046,9 @@ local function performUpdateApply()
 
   state.update.lastApply = nowText()
   setDownloadedState(false, 0)
+  state.update.hashValidated = false
+  resetDownloadProgress(UPDATE_STATUS.UP_TO_DATE, "no pending download")
+  resetValidationProgress(UPDATE_STATUS.UP_TO_DATE, "no pending validation")
   state.update.pendingFiles = {}
   state.update.filesToUpdate = 0
   state.update.lastError = "none"
@@ -1806,6 +2074,9 @@ local function performUpdateRollback()
   clearStagingWithLog("after manual rollback")
   state.update.lastApply = nowText() .. " (rollback)"
   setDownloadedState(false, 0)
+  state.update.hashValidated = false
+  resetDownloadProgress(UPDATE_STATUS.IDLE, "rollback done")
+  resetValidationProgress(UPDATE_STATUS.IDLE, "rollback done")
   state.update.lastError = "none"
   state.update.lastCheckSummary = "rollback done"
   refreshLocalUpdateSnapshot()

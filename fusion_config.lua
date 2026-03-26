@@ -42,6 +42,7 @@ return {
     branch = "main",
     manifestPath = "fusion.manifest.json",
     rawBaseUrl = "",
+    integrityMode = "size+hash",
     requireConfirmApply = true,
     autoCheckOnStartup = false,
   },

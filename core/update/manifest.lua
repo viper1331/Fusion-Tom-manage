@@ -37,6 +37,19 @@ local function normalizeHashAlgo(value)
   return string.lower(trim(value))
 end
 
+local function normalizeIntegrityMode(value)
+  if not hasValue(value) then
+    return "size+hash"
+  end
+
+  local normalized = string.lower(trim(value))
+  if normalized == "size-only" or normalized == "size_only" or normalized == "sizeonly" then
+    return "size-only"
+  end
+
+  return "size+hash"
+end
+
 local function isSupportedHashAlgo(algo)
   return normalizeHashAlgo(algo) == "sha256"
 end
@@ -307,7 +320,7 @@ function M.computePendingFiles(localManifest, remoteManifest)
   return pending
 end
 
-function M.validateDownloadManifest(manifest)
+function M.validateDownloadManifest(manifest, options)
   if type(manifest) ~= "table" then
     return false, "manifest invalid for download"
   end
@@ -334,6 +347,9 @@ function M.validateDownloadManifest(manifest)
     return false, "manifest integrity default hash algorithm unsupported: " .. tostring(defaultAlgo)
   end
 
+  local integrityMode = normalizeIntegrityMode(type(options) == "table" and options.integrityMode or nil)
+  local requireHash = integrityMode ~= "size-only"
+
   for i, entry in ipairs(manifest.files) do
     local path = normalizePath(entry.path)
     if path == "" then
@@ -344,20 +360,25 @@ function M.validateDownloadManifest(manifest)
     end
 
     local hash = normalizeHash(entry.hash)
-    if not hash then
+    if requireHash and not hash then
       return false, "manifest hash missing for " .. tostring(path)
     end
 
-    local hashAlgo = normalizeHashAlgo(entry.hashAlgo) or defaultAlgo
-    if not isSupportedHashAlgo(hashAlgo) then
-      return false, "manifest hash algorithm unsupported for " .. tostring(path) .. ": " .. tostring(hashAlgo)
-    end
-    if not isValidHash(hash, hashAlgo) then
-      return false, "manifest hash format invalid for " .. tostring(path) .. ": " .. tostring(hash)
-    end
+    if hash then
+      local hashAlgo = normalizeHashAlgo(entry.hashAlgo) or defaultAlgo
+      if not isSupportedHashAlgo(hashAlgo) then
+        return false, "manifest hash algorithm unsupported for " .. tostring(path) .. ": " .. tostring(hashAlgo)
+      end
+      if not isValidHash(hash, hashAlgo) then
+        return false, "manifest hash format invalid for " .. tostring(path) .. ": " .. tostring(hash)
+      end
 
-    entry.hash = hash
-    entry.hashAlgo = hashAlgo
+      entry.hash = hash
+      entry.hashAlgo = hashAlgo
+    else
+      entry.hash = nil
+      entry.hashAlgo = nil
+    end
   end
 
   return true, commit

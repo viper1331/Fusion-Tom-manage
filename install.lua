@@ -49,6 +49,7 @@ local defaults = {
     branch = "main",
     manifestPath = "fusion.manifest.json",
     rawBaseUrl = "",
+    integrityMode = "size+hash",
     requireConfirmApply = true,
     autoCheckOnStartup = false,
   },
@@ -254,6 +255,7 @@ local function stepUpdate()
   cfg.update.branch = prompt(cfg.update.branch, "Branche distante")
   cfg.update.manifestPath = prompt(cfg.update.manifestPath, "Chemin manifest distant")
   cfg.update.rawBaseUrl = prompt(cfg.update.rawBaseUrl, "Raw base URL optionnelle (laisser vide pour GitHub raw)")
+  cfg.update.integrityMode = prompt(cfg.update.integrityMode, "Mode integrite (size+hash / size-only)")
   cfg.update.requireConfirmApply = promptBool(cfg.update.requireConfirmApply, "Confirmer avant APPLY")
   cfg.update.autoCheckOnStartup = promptBool(cfg.update.autoCheckOnStartup, "Auto CHECK au demarrage")
 end
@@ -276,6 +278,7 @@ local function summary()
   print("Page start: " .. tostring(cfg.ui.startPage))
   print("Update channel: " .. tostring(cfg.update.channel))
   print("Update branch: " .. tostring(cfg.update.branch))
+  print("Integrity mode: " .. tostring(cfg.update.integrityMode))
   print("Auto-check: " .. tostring(cfg.update.autoCheckOnStartup))
   print("")
   print("Sauvegarder ? (o/n)")

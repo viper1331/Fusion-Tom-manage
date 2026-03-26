@@ -43,13 +43,13 @@ local function shorten(text, maxLen)
   return string.sub(value, 1, limit - 3) .. "..."
 end
 
-local function buildDownloadProgress(updateState)
-  local raw = type(updateState.downloadProgress) == "table" and updateState.downloadProgress or {}
+local function buildPhaseProgress(rawState, fallbackPhase)
+  local raw = type(rawState) == "table" and rawState or {}
   local totalFiles = toInt(raw.totalFiles)
   local completedFiles = toInt(raw.completedFiles)
   local totalBytesExpected = toInt(raw.totalBytesExpected)
   local totalBytesCompleted = toInt(raw.totalBytesCompleted)
-  local phase = type(raw.phase) == "string" and raw.phase ~= "" and raw.phase or (updateState.remoteStatus or "IDLE")
+  local phase = type(raw.phase) == "string" and raw.phase ~= "" and raw.phase or (fallbackPhase or "IDLE")
   local currentFile = type(raw.currentFile) == "string" and raw.currentFile ~= "" and raw.currentFile or "-"
   local percent = toPercent(raw.percent)
 
@@ -76,7 +76,15 @@ local function buildDownloadProgress(updateState)
   }
 end
 
-local function shortDownloadStatus(status)
+local function buildDownloadProgress(updateState)
+  return buildPhaseProgress(updateState.downloadProgress, updateState.remoteStatus or "IDLE")
+end
+
+local function buildValidationProgress(updateState)
+  return buildPhaseProgress(updateState.validationProgress, "IDLE")
+end
+
+local function shortPhaseStatus(status)
   if status == "DOWNLOADING" then
     return "DL"
   end
@@ -89,6 +97,9 @@ local function shortDownloadStatus(status)
   if status == "DOWNLOAD FAILED" then
     return "FAIL"
   end
+  if status == "VALIDATION FAILED" then
+    return "VFAIL"
+  end
   if status == "UP TO DATE" then
     return "OK"
   end
@@ -98,12 +109,18 @@ end
 local function buildStatusRows(ctx)
   local updateState = ctx.updateState
   local C = ctx.colors
-  local progress = buildDownloadProgress(updateState)
+  local downloadProgress = buildDownloadProgress(updateState)
+  local validationProgress = buildValidationProgress(updateState)
 
   return {
     { label = "STATUS", value = updateState.remoteStatus, color = ctx.updateStatusColor(updateState.remoteStatus) },
-    { label = "DL STATUS", value = progress.phase, color = ctx.updateStatusColor(progress.phase) },
-    { label = "DL PROGRESS", value = progress.filesText .. " (" .. progress.percentText .. ")", color = C.cyan },
+    { label = "INTEGRITY MODE", value = updateState.integrityMode or "size+hash", color = C.text },
+    { label = "DL STATUS", value = downloadProgress.phase, color = ctx.updateStatusColor(downloadProgress.phase) },
+    { label = "DL PROGRESS", value = downloadProgress.filesText .. " (" .. downloadProgress.percentText .. ")", color = C.cyan },
+    { label = "VAL STATUS", value = validationProgress.phase, color = ctx.updateStatusColor(validationProgress.phase) },
+    { label = "VAL PROGRESS", value = validationProgress.filesText .. " (" .. validationProgress.percentText .. ")", color = C.yellow },
+    { label = "HASH REQUIRED", value = updateState.hashValidationRequired and "YES" or "NO", color = updateState.hashValidationRequired and C.orange or C.cyan },
+    { label = "HASH VALIDATED", value = updateState.hashValidated and "YES" or "NO", color = updateState.hashValidated and C.green or C.orange },
     { label = "DETAIL", value = updateState.statusDetail ~= "" and updateState.statusDetail or "-", color = C.muted },
     { label = "INTEGRITY", value = updateState.integrityStatus, color = ctx.integrityStatusColor(updateState.integrityStatus) },
     {
@@ -145,7 +162,10 @@ function M.drawMicro(args)
     w = r.w - ui.smallPad * 2,
     h = r.h - infoH - args.sv(18) - ui.smallPad * 2,
   }
-  local progress = buildDownloadProgress(updateState)
+  local downloadProgress = buildDownloadProgress(updateState)
+  local validationProgress = buildValidationProgress(updateState)
+  local isValidationPhase = updateState.remoteStatus == "VALIDATING" or updateState.remoteStatus == "VALIDATION FAILED"
+  local activeProgress = isValidationPhase and validationProgress or downloadProgress
 
   local rowY = infoRect.y + 2
   args.drawText(infoRect.x + 1, rowY, "LV", C.text, 1)
@@ -156,24 +176,20 @@ function M.drawMicro(args)
   args.drawTextRight(infoRect.x + infoRect.w - 1, rowY, updateState.remoteVersion, C.yellow, 1)
 
   rowY = rowY + 9
-  args.drawText(infoRect.x + 1, rowY, "BR", C.text, 1)
-  args.drawTextRight(infoRect.x + infoRect.w - 1, rowY, updateState.remoteBranch or "-", C.text, 1)
-
-  rowY = rowY + 9
-  args.drawText(infoRect.x + 1, rowY, "CM", C.text, 1)
-  args.drawTextRight(infoRect.x + infoRect.w - 1, rowY, args.shortCommit(updateState.remoteCommit, 8), C.cyan, 1)
-
-  rowY = rowY + 9
   args.drawText(infoRect.x + 1, rowY, "ST", C.text, 1)
-  args.drawTextRight(infoRect.x + infoRect.w - 1, rowY, shortDownloadStatus(progress.phase), args.updateStatusColor(progress.phase), 1)
+  args.drawTextRight(infoRect.x + infoRect.w - 1, rowY, shortPhaseStatus(updateState.remoteStatus), args.updateStatusColor(updateState.remoteStatus), 1)
 
   rowY = rowY + 9
   args.drawText(infoRect.x + 1, rowY, "DL", C.text, 1)
-  args.drawTextRight(infoRect.x + infoRect.w - 1, rowY, tostring(progress.completedFiles) .. "/" .. tostring(progress.totalFiles), C.cyan, 1)
+  args.drawTextRight(infoRect.x + infoRect.w - 1, rowY, tostring(downloadProgress.completedFiles) .. "/" .. tostring(downloadProgress.totalFiles), C.cyan, 1)
+
+  rowY = rowY + 9
+  args.drawText(infoRect.x + 1, rowY, "VA", C.text, 1)
+  args.drawTextRight(infoRect.x + infoRect.w - 1, rowY, tostring(validationProgress.completedFiles) .. "/" .. tostring(validationProgress.totalFiles), C.yellow, 1)
 
   rowY = rowY + 9
   args.drawText(infoRect.x + 1, rowY, "%", C.text, 1)
-  args.drawTextRight(infoRect.x + infoRect.w - 1, rowY, progress.percentText, C.yellow, 1)
+  args.drawTextRight(infoRect.x + infoRect.w - 1, rowY, activeProgress.percentText, C.yellow, 1)
 
   local pad = 1
   local gap = math.max(1, math.floor(ui.smallPad * 0.6))
@@ -210,29 +226,40 @@ function M.draw(args)
 
   args.drawPanel(statusRect.x, statusRect.y, statusRect.w, statusRect.h, "MAJ STATUS")
   local step = math.max(12, args.sv(16))
-  local progress = buildDownloadProgress(updateState)
+  local downloadProgress = buildDownloadProgress(updateState)
+  local validationProgress = buildValidationProgress(updateState)
+  local isValidationPhase = updateState.remoteStatus == "VALIDATING" or updateState.remoteStatus == "VALIDATION FAILED"
+  local activeProgress = isValidationPhase and validationProgress or downloadProgress
   local gaugeX = statusRect.x + ui.pad
   local gaugeW = statusRect.w - ui.pad * 2
-  local gaugeY = statusRect.y + args.sv(54)
+  local gaugeY = statusRect.y + args.sv(52)
   local gaugeH = math.max(ui.gaugeH, args.sv(14))
-  local progressColor = progress.phase == "DOWNLOAD FAILED" and C.red or (progress.phase == "READY TO APPLY" and C.green or C.cyan)
+  local downloadColor = downloadProgress.phase == "DOWNLOAD FAILED" and C.red or (downloadProgress.phase == "READY TO APPLY" and C.green or C.cyan)
+  local validationColor = validationProgress.phase == "VALIDATION FAILED" and C.red or (validationProgress.phase == "READY TO APPLY" and C.green or C.yellow)
 
   if type(args.drawGauge) == "function" then
-    args.drawGauge(gaugeX, gaugeY, gaugeW, gaugeH, progress.percent, progressColor, "DOWNLOAD", progress.percentText)
+    args.drawGauge(gaugeX, gaugeY, gaugeW, gaugeH, downloadProgress.percent, downloadColor, "DOWNLOAD", downloadProgress.percentText)
+    local validationGaugeY = gaugeY + gaugeH + args.sv(18)
+    args.drawGauge(gaugeX, validationGaugeY, gaugeW, gaugeH, validationProgress.percent, validationColor, "VALIDATION", validationProgress.percentText)
+    gaugeY = validationGaugeY
   else
-    args.drawToggleRow(statusRect, gaugeY, "DOWNLOAD", progress.filesText .. " " .. progress.percentText, progressColor)
+    args.drawToggleRow(statusRect, gaugeY, "DOWNLOAD", downloadProgress.filesText .. " " .. downloadProgress.percentText, downloadColor)
+    gaugeY = gaugeY + step
+    args.drawToggleRow(statusRect, gaugeY, "VALIDATION", validationProgress.filesText .. " " .. validationProgress.percentText, validationColor)
   end
 
   local rowY = gaugeY + gaugeH + args.sv(8)
-  local currentFileValue = ui.compact and shorten(progress.currentFileBase, 20) or shorten(progress.currentFile, 42)
-  args.drawToggleRow(statusRect, rowY, "FILES", progress.filesText, C.cyan)
+  local currentFileValue = ui.compact and shorten(activeProgress.currentFileBase, 20) or shorten(activeProgress.currentFile, 42)
+  args.drawToggleRow(statusRect, rowY, "DOWNLOAD", downloadProgress.filesText, C.cyan)
+  rowY = rowY + step
+  args.drawToggleRow(statusRect, rowY, "VALIDATION", validationProgress.filesText, C.yellow)
   rowY = rowY + step
   args.drawToggleRow(statusRect, rowY, "CURRENT FILE", currentFileValue, C.text)
   rowY = rowY + step
-  args.drawToggleRow(statusRect, rowY, "DOWNLOAD STATUS", progress.phase, args.updateStatusColor(progress.phase))
+  args.drawToggleRow(statusRect, rowY, "STATUS", updateState.remoteStatus, args.updateStatusColor(updateState.remoteStatus))
   rowY = rowY + step
   if not ui.compact then
-    args.drawToggleRow(statusRect, rowY, "BYTES", progress.bytesText, C.muted)
+    args.drawToggleRow(statusRect, rowY, "BYTES", activeProgress.bytesText, C.muted)
     rowY = rowY + step
   end
 

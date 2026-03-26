@@ -174,8 +174,9 @@ function M.markStagingReady(fileEntries, stagingDir, context)
   return M.writeStagingMeta(stagingDir, meta)
 end
 
-function M.validateStaging(fileEntries, stagingDir, expectedContext, logger, phase)
+function M.validateStaging(fileEntries, stagingDir, expectedContext, logger, phase, options)
   local phaseName = type(phase) == "string" and phase or "staging validation"
+  local skipHash = type(options) == "table" and options.skipHash == true
 
   if type(stagingDir) ~= "string" or stagingDir == "" then
     return false, "invalid staging directory"
@@ -251,22 +252,6 @@ function M.validateStaging(fileEntries, stagingDir, expectedContext, logger, pha
         return false, "unsupported hash algorithm in staging for " .. tostring(path) .. ": algo=" .. tostring(hashAlgo)
       end
 
-      local actualHash, hashErr = UpdateHash.hashFile(stagedPath, hashAlgo)
-      if not actualHash then
-        return false, "hash compute failed in staging for " .. tostring(path) .. ": " .. tostring(hashErr)
-      end
-
-      if logger then
-        logger("HASH " .. tostring(phaseName) .. " path=" .. tostring(path) .. " algo=" .. tostring(hashAlgo) .. " expected=" .. tostring(expectedHash) .. " actual=" .. tostring(actualHash))
-      end
-
-      if actualHash ~= expectedHash then
-        return false, "hash mismatch in staging for " .. tostring(path)
-          .. ": expected=" .. tostring(expectedHash)
-          .. ", received=" .. tostring(actualHash)
-          .. ", algo=" .. tostring(hashAlgo)
-      end
-
       local stagedMetaHash = normalizeHash(stagedMeta.hash)
       if stagedMetaHash ~= expectedHash then
         return false, "staging meta hash mismatch for " .. tostring(path)
@@ -275,6 +260,24 @@ function M.validateStaging(fileEntries, stagingDir, expectedContext, logger, pha
       local stagedMetaAlgo = resolveHashAlgo(stagedMeta)
       if stagedMetaAlgo ~= hashAlgo then
         return false, "staging meta hash algorithm mismatch for " .. tostring(path)
+      end
+
+      if not skipHash then
+        local actualHash, hashErr = UpdateHash.hashFile(stagedPath, hashAlgo)
+        if not actualHash then
+          return false, "hash compute failed in staging for " .. tostring(path) .. ": " .. tostring(hashErr)
+        end
+
+        if logger then
+          logger("HASH " .. tostring(phaseName) .. " path=" .. tostring(path) .. " algo=" .. tostring(hashAlgo) .. " expected=" .. tostring(expectedHash) .. " actual=" .. tostring(actualHash))
+        end
+
+        if actualHash ~= expectedHash then
+          return false, "hash mismatch in staging for " .. tostring(path)
+            .. ": expected=" .. tostring(expectedHash)
+            .. ", received=" .. tostring(actualHash)
+            .. ", algo=" .. tostring(hashAlgo)
+        end
       end
     end
   end
@@ -332,8 +335,8 @@ function M.createBackup(fileEntries, backupDir, context, logger)
   }
 end
 
-function M.applyFromStaging(fileEntries, stagingDir, logger)
-  local valid, validErr = M.validateStaging(fileEntries, stagingDir, nil, logger, "apply validation")
+function M.applyFromStaging(fileEntries, stagingDir, logger, options)
+  local valid, validErr = M.validateStaging(fileEntries, stagingDir, nil, logger, "apply validation", options)
   if not valid then
     return false, validErr
   end

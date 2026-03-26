@@ -274,20 +274,6 @@ function M.downloadFiles(source, fileEntries, targetDir, logger, onProgress)
       return nil, err
     end
 
-    emitProgress(onProgress, {
-      event = "file_validating",
-      phase = "VALIDATING",
-      path = normalizedPath,
-      index = i,
-      totalFiles = totalFiles,
-      completedFiles = i - 1,
-      expectedSize = expectedSize,
-      receivedSize = downloaded.size,
-      totalBytesExpected = totalBytesExpected,
-      totalBytesCompleted = totalBytesCompleted,
-      url = requestedUrl,
-    }, logger)
-
     if type(entry.size) == "number" and entry.size >= 0 and downloaded.size ~= entry.size then
       local mismatch = "size mismatch for " .. tostring(normalizedPath)
         .. ": expected=" .. tostring(entry.size)
@@ -297,34 +283,6 @@ function M.downloadFiles(source, fileEntries, targetDir, logger, onProgress)
         logger(mismatch)
       end
       return nil, mismatch
-    end
-
-    local expectedHash = normalizeHash(type(entry) == "table" and entry.hash or nil)
-    if expectedHash then
-      local hashAlgo = resolveHashAlgo(source, entry)
-      if not UpdateHash.isSupportedAlgo(hashAlgo) then
-        return nil, "unsupported hash algorithm for " .. tostring(normalizedPath) .. ": algo=" .. tostring(hashAlgo)
-      end
-
-      local actualHash, hashErr = UpdateHash.hashFile(destination, hashAlgo)
-      if not actualHash then
-        return nil, "hash compute failed for " .. tostring(normalizedPath) .. ": " .. tostring(hashErr)
-      end
-
-      if logger then
-        logger("HASH download validation path=" .. tostring(normalizedPath) .. " algo=" .. tostring(hashAlgo) .. " expected=" .. tostring(expectedHash) .. " actual=" .. tostring(actualHash))
-      end
-
-      if actualHash ~= expectedHash then
-        return nil, "hash mismatch for " .. tostring(normalizedPath)
-          .. ": expected=" .. tostring(expectedHash)
-          .. ", received=" .. tostring(actualHash)
-          .. ", algo=" .. tostring(hashAlgo)
-          .. ", url=" .. tostring(downloaded.url)
-      end
-
-      downloaded.hash = actualHash
-      downloaded.hashAlgo = hashAlgo
     end
 
     totalBytesCompleted = totalBytesCompleted + toNonNegativeInt(downloaded.size)
@@ -345,15 +303,118 @@ function M.downloadFiles(source, fileEntries, targetDir, logger, onProgress)
     out[#out + 1] = downloaded
     if logger then
       logger("downloaded " .. tostring(downloaded.path) .. " (" .. tostring(downloaded.size) .. " bytes) from " .. tostring(downloaded.url))
-      if downloaded.hash and downloaded.hashAlgo then
-        logger("HASH download ok path=" .. tostring(downloaded.path) .. " algo=" .. tostring(downloaded.hashAlgo) .. " hash=" .. tostring(downloaded.hash))
-      end
     end
   end
 
   emitProgress(onProgress, {
     event = "complete",
-    phase = "READY TO APPLY",
+    phase = "DOWNLOADING",
+    index = totalFiles,
+    totalFiles = totalFiles,
+    completedFiles = totalFiles,
+    totalBytesExpected = totalBytesExpected,
+    totalBytesCompleted = totalBytesCompleted,
+  }, logger)
+
+  return out
+end
+
+function M.validateDownloadedHashes(source, fileEntries, targetDir, logger, onProgress)
+  if type(fileEntries) ~= "table" then
+    return nil, "invalid file list for hash validation"
+  end
+
+  if type(targetDir) ~= "string" or targetDir == "" then
+    return nil, "invalid validation target directory"
+  end
+
+  if not fs.exists(targetDir) or not fs.isDir(targetDir) then
+    return nil, "staging directory missing: " .. tostring(targetDir)
+  end
+
+  local out = {}
+  local totalFiles = #fileEntries
+  local totalBytesExpected = sumExpectedBytes(fileEntries)
+  local totalBytesCompleted = 0
+
+  for i, entry in ipairs(fileEntries) do
+    local relativePath = type(entry) == "table" and entry.path or nil
+    if type(relativePath) ~= "string" or relativePath == "" then
+      return nil, "invalid entry path at index " .. tostring(i)
+    end
+
+    local normalizedPath = normalizePath(relativePath)
+    local expectedHash = normalizeHash(type(entry) == "table" and entry.hash or nil)
+    local expectedSize = type(entry.size) == "number" and toNonNegativeInt(entry.size) or nil
+    local stagedPath = fs.combine(targetDir, normalizedPath)
+
+    emitProgress(onProgress, {
+      event = "file_start",
+      phase = "VALIDATING",
+      path = normalizedPath,
+      index = i,
+      totalFiles = totalFiles,
+      completedFiles = i - 1,
+      expectedSize = expectedSize,
+      totalBytesExpected = totalBytesExpected,
+      totalBytesCompleted = totalBytesCompleted,
+    }, logger)
+
+    if not fs.exists(stagedPath) then
+      return nil, "missing staged file for hash validation: " .. tostring(normalizedPath)
+    end
+
+    if not expectedHash then
+      return nil, "manifest hash missing for " .. tostring(normalizedPath)
+    end
+
+    local hashAlgo = resolveHashAlgo(source, entry)
+    if not UpdateHash.isSupportedAlgo(hashAlgo) then
+      return nil, "unsupported hash algorithm for " .. tostring(normalizedPath) .. ": algo=" .. tostring(hashAlgo)
+    end
+
+    local actualHash, hashErr = UpdateHash.hashFile(stagedPath, hashAlgo)
+    if not actualHash then
+      return nil, "hash compute failed for " .. tostring(normalizedPath) .. ": " .. tostring(hashErr)
+    end
+
+    if logger then
+      logger("HASH validation path=" .. tostring(normalizedPath) .. " algo=" .. tostring(hashAlgo) .. " expected=" .. tostring(expectedHash) .. " actual=" .. tostring(actualHash))
+    end
+
+    if actualHash ~= expectedHash then
+      return nil, "hash mismatch for " .. tostring(normalizedPath)
+        .. ": expected=" .. tostring(expectedHash)
+        .. ", received=" .. tostring(actualHash)
+        .. ", algo=" .. tostring(hashAlgo)
+    end
+
+    local fileSize = fs.getSize(stagedPath)
+    totalBytesCompleted = totalBytesCompleted + toNonNegativeInt(fileSize)
+    emitProgress(onProgress, {
+      event = "file_done",
+      phase = "VALIDATING",
+      path = normalizedPath,
+      index = i,
+      totalFiles = totalFiles,
+      completedFiles = i,
+      expectedSize = expectedSize,
+      receivedSize = fileSize,
+      totalBytesExpected = totalBytesExpected,
+      totalBytesCompleted = totalBytesCompleted,
+    }, logger)
+
+    out[#out + 1] = {
+      path = normalizedPath,
+      hash = actualHash,
+      hashAlgo = hashAlgo,
+      size = fileSize,
+    }
+  end
+
+  emitProgress(onProgress, {
+    event = "complete",
+    phase = "VALIDATING",
     index = totalFiles,
     totalFiles = totalFiles,
     completedFiles = totalFiles,
