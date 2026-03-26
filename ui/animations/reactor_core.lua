@@ -1,0 +1,246 @@
+local M = {}
+
+local function pulseWave(frame, period)
+  local safePeriod = math.max(2, tonumber(period) or 2)
+  local t = frame % safePeriod
+  local half = safePeriod / 2
+  if t < half then
+    return t / half
+  end
+  return (safePeriod - t) / half
+end
+
+local function clamp01(value)
+  if value < 0 then
+    return 0
+  end
+  if value > 1 then
+    return 1
+  end
+  return value
+end
+
+local function hasWarning(data)
+  if not data then
+    return false
+  end
+  if data.status == "WARNING" then
+    return true
+  end
+  return data.alerts and data.alerts ~= "none"
+end
+
+local function isScramMode(data)
+  local mode = string.lower(tostring(data and data.logicMode or ""))
+  return string.find(mode, "scram", 1, true) ~= nil
+end
+
+local function isHighLoad(data)
+  local production = tonumber(data and data.productionRate) or 0
+  local plasma = tonumber(data and data.plasmaMK) or 0
+  local caseMK = tonumber(data and data.caseMK) or 0
+
+  if production >= 12000000 then
+    return true
+  end
+  if plasma >= 120 then
+    return true
+  end
+  if caseMK >= 10 then
+    return true
+  end
+  return false
+end
+
+local function resolveCoreState(data)
+  if not data or not data.formed then
+    return "offline"
+  end
+
+  if isScramMode(data) then
+    return "scram"
+  end
+
+  if not data.ignited then
+    local relayPulse = data.relayStates and data.relayStates.laserCharge
+    local ampPct = tonumber(data.laserAmplifierPct) or 0
+    if relayPulse or ampPct >= 0.70 then
+      return "ignition"
+    end
+    return "formed"
+  end
+
+  if hasWarning(data) then
+    return "warning"
+  end
+
+  if isHighLoad(data) then
+    return "high_load"
+  end
+
+  return "running"
+end
+
+local function buildStateStyle(data, stateName, frame)
+  local style = {
+    outer = 0x18004A72,
+    mid = 0x284FCBFF,
+    inner = 0x44CFF6FF,
+    core = 0xFFE7FBFF,
+    spark = 0xFFB5F3FF,
+    sparkCount = 4,
+    pulsePeriod = 18,
+    haloBoost = 1.00,
+    flicker = 0.10,
+  }
+
+  if stateName == "offline" then
+    style.outer = 0x08000000
+    style.mid = 0x0E142235
+    style.inner = 0x121F3148
+    style.core = 0x30182430
+    style.spark = 0x00000000
+    style.sparkCount = 0
+    style.pulsePeriod = 26
+    style.haloBoost = 0.40
+    style.flicker = 0.02
+  elseif stateName == "formed" then
+    style.outer = 0x0E1A2345
+    style.mid = 0x16435E8A
+    style.inner = 0x2471A8D5
+    style.core = 0x886BBBEA
+    style.spark = 0x6682D8FF
+    style.sparkCount = 2
+    style.pulsePeriod = 22
+    style.haloBoost = 0.60
+    style.flicker = 0.05
+  elseif stateName == "ignition" then
+    local ampPct = clamp01(tonumber(data and data.laserAmplifierPct) or 0)
+    style.outer = 0x1C2A3A80
+    style.mid = 0x2E4A6BCE
+    style.inner = 0x5083D7FF
+    style.core = 0xFFF6FDFF
+    style.spark = 0xFFC8F4FF
+    style.sparkCount = 5
+    style.pulsePeriod = 12
+    style.haloBoost = 0.85 + (ampPct * 0.55)
+    style.flicker = 0.12 + (ampPct * 0.12)
+  elseif stateName == "running" then
+    style.outer = 0x1A302F8E
+    style.mid = 0x2A568AE0
+    style.inner = 0x568ADFFF
+    style.core = 0xFFFFFFFF
+    style.spark = 0xFFCCF6FF
+    style.sparkCount = 5
+    style.pulsePeriod = 14
+    style.haloBoost = 1.00
+    style.flicker = 0.14
+  elseif stateName == "high_load" then
+    style.outer = 0x224040AA
+    style.mid = 0x344E84F0
+    style.inner = 0x5E87E7FF
+    style.core = 0xFFFFFFFF
+    style.spark = 0xFFFFFFFF
+    style.sparkCount = 7
+    style.pulsePeriod = 10
+    style.haloBoost = 1.28
+    style.flicker = 0.18
+  elseif stateName == "warning" then
+    local unstable = ((frame * 13) % 9) / 9
+    style.outer = 0x244A2A98
+    style.mid = 0x2E6A50D6
+    style.inner = 0x5A9FE8FF
+    style.core = 0xFFF5FDFF
+    style.spark = 0xFFE2F8FF
+    style.sparkCount = 6
+    style.pulsePeriod = 9
+    style.haloBoost = 1.08 + (unstable * 0.30)
+    style.flicker = 0.22
+  elseif stateName == "scram" then
+    local decay = 1 - (((frame * 3) % 16) / 16)
+    style.outer = 0x120A1228
+    style.mid = 0x1A162B52
+    style.inner = 0x223E699A
+    style.core = 0x883E8AC2
+    style.spark = 0x553A86B6
+    style.sparkCount = 2
+    style.pulsePeriod = 7
+    style.haloBoost = 0.32 + (decay * 0.38)
+    style.flicker = 0.08
+  end
+
+  return style
+end
+
+function M.resolveState(data)
+  return resolveCoreState(data)
+end
+
+function M.draw(args, x, y, w, h, data)
+  local gpu = args.gpu
+  if not gpu then
+    return
+  end
+
+  local frame = (args.state and args.state.animTick) or 0
+  local coreState = resolveCoreState(data)
+  local style = buildStateStyle(data, coreState, frame)
+  local ui = args.ui or {}
+
+  local cx = x + math.floor(w * 0.438)
+  local cy = y + math.floor(h * 0.462)
+
+  local baseW = math.max(8, math.floor(w * (ui.micro and 0.030 or 0.038)))
+  local baseH = math.max(10, math.floor(h * (ui.micro and 0.045 or 0.055)))
+  local pulse = pulseWave(frame + 3, style.pulsePeriod)
+  local drift = (((frame * 11) % 17) / 17) * style.flicker
+  local haloFactor = (0.88 + (pulse * 0.25) + drift) * style.haloBoost
+
+  local outerW = math.max(10, math.floor(baseW * 1.95 * haloFactor))
+  local outerH = math.max(12, math.floor(baseH * 2.05 * haloFactor))
+  local midW = math.max(8, math.floor(baseW * 1.45 * haloFactor))
+  local midH = math.max(10, math.floor(baseH * 1.55 * haloFactor))
+  local innerW = math.max(6, math.floor(baseW * 1.05 * haloFactor))
+  local innerH = math.max(8, math.floor(baseH * 1.12 * haloFactor))
+
+  local outerX = cx - math.floor(outerW / 2)
+  local outerY = cy - math.floor(outerH / 2)
+  local midX = cx - math.floor(midW / 2)
+  local midY = cy - math.floor(midH / 2)
+  local innerX = cx - math.floor(innerW / 2)
+  local innerY = cy - math.floor(innerH / 2)
+
+  gpu.filledRectangle(outerX, outerY, outerW, outerH, style.outer)
+  gpu.filledRectangle(midX, midY, midW, midH, style.mid)
+  gpu.filledRectangle(innerX, innerY, innerW, innerH, style.inner)
+
+  local coreW = math.max(3, math.floor(innerW * (ui.micro and 0.42 or 0.48)))
+  local coreH = math.max(4, math.floor(innerH * (ui.micro and 0.50 or 0.56)))
+  local coreX = cx - math.floor(coreW / 2)
+  local coreY = cy - math.floor(coreH / 2)
+  gpu.filledRectangle(coreX, coreY, coreW, coreH, style.core)
+
+  if style.sparkCount > 0 then
+    local sparkRadiusX = math.max(2, math.floor(innerW * 0.62))
+    local sparkRadiusY = math.max(2, math.floor(innerH * 0.66))
+    local sparkSize = ui.micro and 1 or 2
+
+    for i = 1, style.sparkCount do
+      local angle = ((frame * 0.17) + (i * 0.92)) * 1.27
+      local jitter = 0.75 + pulseWave(frame + (i * 3), style.pulsePeriod + i) * 0.45
+      local sx = cx + math.floor(math.cos(angle) * sparkRadiusX * jitter)
+      local sy = cy + math.floor(math.sin(angle) * sparkRadiusY * jitter)
+      gpu.filledRectangle(sx, sy, sparkSize, sparkSize, style.spark)
+    end
+  end
+
+  if coreState == "warning" and (frame % 3 == 0) then
+    gpu.filledRectangle(coreX - 1, coreY - 1, coreW + 2, coreH + 2, 0x2AFFFFFF)
+  elseif coreState == "ignition" and (frame % 4 <= 1) then
+    gpu.filledRectangle(coreX, coreY, coreW, math.max(1, math.floor(coreH * 0.4)), 0x48FFFFFF)
+  elseif coreState == "scram" then
+    gpu.filledRectangle(coreX, coreY + coreH - 1, coreW, 1, 0x402E5A84)
+  end
+end
+
+return M
