@@ -160,6 +160,9 @@ local OverviewPageView = assert(dofile("ui/pages/overview_page.lua"))
 local OverviewGraphicsView = assert(dofile("ui/pages/overview_graphics.lua"))
 local TelemetryRuntime = assert(dofile("core/runtime/telemetry_runtime.lua"))
 local ActionRuntime = assert(dofile("core/runtime/action_runtime.lua"))
+local AppBootstrap = assert(dofile("core/app/bootstrap.lua"))
+local AppRouter = assert(dofile("core/app/router.lua"))
+local AppMainLoop = assert(dofile("core/app/main_loop.lua"))
 
 -- === External config loader ===
 local function loadExternalConfig()
@@ -1913,60 +1916,14 @@ local function readFusionData(force)
   return pollLiveData(force)
 end
 
-local function setPage(pageId)
-  if not pageExists(pageId) then
-    state.message = "unknown page: " .. tostring(pageId)
-    return
-  end
+local appWiring = nil
 
-  state.page = pageId
-  if pageId ~= "MAJ" then
-    state.update.applyConfirmArmed = false
-  end
-  state.lastAction = "page:" .. pageId:lower()
-  state.message = "page " .. pageId:lower()
+local function setPage(pageId)
+  AppRouter.setPage(appWiring.router, pageId)
 end
 
 local function handleAction(action)
-  if string.sub(action, 1, 5) == "PAGE_" then
-    setPage(string.sub(action, 6))
-    return
-  end
-
-  state.lastAction = action
-
-  if actionRuntime.executeCommand(action) then
-    -- Runtime action handled in dedicated module.
-
-  elseif action == "RELOAD_ASSETS" then
-    tryLoadAssets()
-    state.message = "assets reloaded"
-
-  elseif action == "UPDATE_CHECK" then
-    local ok, msg = performUpdateCheck("manual")
-    state.message = ok and ("MAJ CHECK -> " .. tostring(state.update.remoteStatus) .. " (" .. firstLine(msg) .. ")") or ("MAJ CHECK ERROR -> " .. firstLine(msg))
-
-  elseif action == "UPDATE_DOWNLOAD" then
-    local ok, msg = performUpdateDownload()
-    state.message = ok and ("MAJ DOWNLOAD -> " .. tostring(state.update.remoteStatus) .. " (" .. firstLine(msg) .. ")") or ("MAJ DOWNLOAD ERROR -> " .. firstLine(msg))
-
-  elseif action == "UPDATE_APPLY" then
-    local ok, msg = performUpdateApply()
-    state.message = ok and ("MAJ APPLY -> " .. tostring(state.update.remoteStatus) .. " (" .. firstLine(msg) .. ")") or ("MAJ APPLY ERROR -> " .. firstLine(msg))
-
-  elseif action == "UPDATE_ROLLBACK" then
-    local ok, msg = performUpdateRollback()
-    state.message = ok and ("MAJ ROLLBACK -> " .. tostring(state.update.remoteStatus) .. " (" .. firstLine(msg) .. ")") or ("MAJ ROLLBACK ERROR -> " .. firstLine(msg))
-
-  elseif action == "UPDATE_RESTART" then
-    local ok, msg = requestProgramRestart()
-    state.message = ok and firstLine(msg) or ("restart failed: " .. firstLine(msg))
-
-  else
-    state.message = action
-  end
-
-  pollLiveData(true)
+  AppRouter.handleAction(appWiring.router, action)
 end
 
 local function render()
@@ -2002,77 +1959,54 @@ local function render()
 
   drawHeader(L.header, data)
   drawNav(L.nav)
-
-  if state.page == "OVERVIEW" then
-    drawOverviewPage(L.body, data)
-  elseif state.page == "CONTROL" then
-    drawControlPage(L.body, data)
-  elseif state.page == "FUEL" then
-    drawFuelPage(L.body, data)
-  elseif state.page == "SYSTEM" then
-    drawSystemPage(L.body, data)
-  else
-    drawUpdatePage(L.body)
-  end
+  AppRouter.drawCurrentPage(appWiring.router, L.body, data)
 
   drawFooter(L.footer, data)
   gpu.sync()
 end
 
+appWiring = AppBootstrap.buildWiring({
+  state = state,
+  updateCfg = UPDATE_CFG,
+  refreshSeconds = REFRESH_SECONDS,
+  pageExists = pageExists,
+  executeRuntimeCommand = actionRuntime.executeCommand,
+  buildUI = buildUI,
+  tryLoadAssets = tryLoadAssets,
+  refreshLocalUpdateSnapshot = refreshLocalUpdateSnapshot,
+  loadUpdateLogTail = loadUpdateLogTail,
+  performUpdateCheck = performUpdateCheck,
+  performUpdateDownload = performUpdateDownload,
+  performUpdateApply = performUpdateApply,
+  performUpdateRollback = performUpdateRollback,
+  requestProgramRestart = requestProgramRestart,
+  pollLiveData = pollLiveData,
+  firstLine = firstLine,
+  processPendingTimer = processPendingTimer,
+  invalidateWrapped = invalidateWrapped,
+  hit = hit,
+  handleAction = handleAction,
+  render = render,
+  getButtons = function()
+    return buttons
+  end,
+  drawOverviewPage = drawOverviewPage,
+  drawControlPage = drawControlPage,
+  drawFuelPage = drawFuelPage,
+  drawSystemPage = drawSystemPage,
+  drawUpdatePage = drawUpdatePage,
+})
+
 local function init()
-  buildUI()
-  tryLoadAssets()
-  refreshLocalUpdateSnapshot()
-  loadUpdateLogTail(12)
-  if UPDATE_CFG.autoCheckOnStartup then
-    local ok, msg = performUpdateCheck("startup")
-    state.message = ok and ("maj startup: " .. firstLine(msg)) or ("maj startup failed: " .. firstLine(msg))
-  end
-  pollLiveData(true)
-  render()
+  AppBootstrap.initialize(appWiring.startup)
 end
 
-local function onTouch(x, y)
-  for _, btn in pairs(buttons) do
-    if hit(btn, x, y) then
-      handleAction(btn.id)
-      render()
-      return
-    end
-  end
+local function runMainLoop()
+  AppMainLoop.run(appWiring.loop)
 end
 
 init()
-
-local timer = os.startTimer(REFRESH_SECONDS)
-
-while true do
-  local event, p1, p2, p3 = os.pullEvent()
-
-  if event == "timer" then
-    if p1 == timer then
-      render()
-      timer = os.startTimer(REFRESH_SECONDS)
-    elseif processPendingTimer(p1) then
-      pollLiveData(true)
-      render()
-    end
-
-  elseif event == "tm_monitor_touch" then
-    onTouch(p2, p3)
-
-  elseif event == "peripheral" or event == "peripheral_detach" then
-    invalidateWrapped(p1)
-    pollLiveData(true)
-    render()
-
-  elseif event == "fusion_restart" then
-    break
-
-  elseif event == "key_up" and p1 == keys.t then
-    break
-  end
-end
+runMainLoop()
 
 if state.restartRequested then
   local target = state.restartTarget or "start_menu_pages_live_v7.lua"
