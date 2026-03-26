@@ -151,6 +151,8 @@ local UpdateVersion = assert(dofile("core/update/version.lua"))
 local UpdateManifest = assert(dofile("core/update/manifest.lua"))
 local UpdateClient = assert(dofile("core/update/client.lua"))
 local UpdateApply = assert(dofile("core/update/apply.lua"))
+local NavigationView = assert(dofile("ui/components/navigation.lua"))
+local UpdatePageView = assert(dofile("ui/pages/update_page.lua"))
 
 -- === External config loader ===
 local function loadExternalConfig()
@@ -2481,21 +2483,14 @@ local function drawHeader(r, data)
 end
 
 local function drawNav(r)
-  drawPanel(r.x, r.y, r.w, r.h, nil)
-
-  local innerX = r.x + ui.smallPad
-  local innerY = r.y + ui.smallPad
-  local innerW = r.w - ui.smallPad * 2
-  local innerH = r.h - ui.smallPad * 2
-  local tabGap = ui.smallPad
-  local count = #PAGES
-  local tabW = math.floor((innerW - tabGap * (count - 1)) / count)
-
-  for i, page in ipairs(PAGES) do
-    local bx = innerX + (i - 1) * (tabW + tabGap)
-    local tone = state.page == page.id and "cyan" or "purple"
-    drawButton("PAGE_" .. page.id, bx, innerY, tabW, innerH, page.label, tone, true)
-  end
+  NavigationView.draw({
+    rect = r,
+    ui = ui,
+    pages = PAGES,
+    activePage = state.page,
+    drawPanel = drawPanel,
+    drawButton = drawButton,
+  })
 end
 
 local function drawFooter(r, data)
@@ -2577,146 +2572,44 @@ local function drawMicroOverview(r, data)
 end
 
 local function drawMicroMajPage(r, data)
-  drawPanel(r.x, r.y, r.w, r.h, "MAJ")
-
-  local infoH = math.max(64, math.floor(r.h * 0.46))
-  local infoRect = { x = r.x + ui.smallPad, y = r.y + sv(18), w = r.w - ui.smallPad * 2, h = infoH }
-  local actionsRect = {
-    x = r.x + ui.smallPad,
-    y = infoRect.y + infoRect.h + ui.smallPad,
-    w = r.w - ui.smallPad * 2,
-    h = r.h - infoH - sv(18) - ui.smallPad * 2,
-  }
-
-  local rowY = infoRect.y + 2
-  drawText(infoRect.x + 1, rowY, "LV", C.text, 1)
-  drawTextRight(infoRect.x + infoRect.w - 1, rowY, state.update.localVersion, C.cyan, 1)
-
-  rowY = rowY + 9
-  drawText(infoRect.x + 1, rowY, "RV", C.text, 1)
-  drawTextRight(infoRect.x + infoRect.w - 1, rowY, state.update.remoteVersion, C.yellow, 1)
-
-  rowY = rowY + 9
-  drawText(infoRect.x + 1, rowY, "BR", C.text, 1)
-  drawTextRight(infoRect.x + infoRect.w - 1, rowY, state.update.remoteBranch or "-", C.text, 1)
-
-  rowY = rowY + 9
-  drawText(infoRect.x + 1, rowY, "CM", C.text, 1)
-  drawTextRight(infoRect.x + infoRect.w - 1, rowY, shortCommit(state.update.remoteCommit, 8), C.cyan, 1)
-
-  rowY = rowY + 9
-  drawText(infoRect.x + 1, rowY, "ST", C.text, 1)
-  drawTextRight(infoRect.x + infoRect.w - 1, rowY, state.update.remoteStatus, updateStatusColor(state.update.remoteStatus), 1)
-
-  rowY = rowY + 9
-  drawText(infoRect.x + 1, rowY, "FL", C.text, 1)
-  drawTextRight(infoRect.x + infoRect.w - 1, rowY, tostring(state.update.filesToUpdate), state.update.filesToUpdate > 0 and C.orange or C.green, 1)
-
-  rowY = rowY + 9
-  drawText(infoRect.x + 1, rowY, "IN", C.text, 1)
-  drawTextRight(infoRect.x + infoRect.w - 1, rowY, shortIntegrityStatus(state.update.integrityStatus), integrityStatusColor(state.update.integrityStatus), 1)
-
-  local pad = 1
-  local gap = math.max(1, math.floor(ui.smallPad * 0.6))
-  local bw = math.floor((actionsRect.w - gap) / 2)
-  local bh = math.max(11, math.floor((actionsRect.h - gap * 2) / 3))
-  local x1 = actionsRect.x + pad
-  local x2 = x1 + bw + gap
-  local y1 = actionsRect.y + pad
-  local y2 = y1 + bh + gap
-  local y3 = y2 + bh + gap
-
-  drawButton("UPDATE_CHECK", x1, y1, bw, bh, "CHECK", "cyan", true)
-  drawButton("UPDATE_DOWNLOAD", x2, y1, bw, bh, "DL", "purple", true)
-  drawButton("UPDATE_APPLY", x1, y2, bw, bh, "APPLY", "green", state.update.downloaded)
-  drawButton("UPDATE_ROLLBACK", x2, y2, bw, bh, "ROLL", "orange", state.update.canRollback)
-  drawButton("UPDATE_RESTART", x1, y3, bw * 2 + gap, bh, "RESTART", "red", true)
+  UpdatePageView.drawMicro({
+    rect = r,
+    data = data,
+    ui = ui,
+    colors = C,
+    updateState = state.update,
+    drawPanel = drawPanel,
+    drawText = drawText,
+    drawTextRight = drawTextRight,
+    drawButton = drawButton,
+    sv = sv,
+    shortCommit = shortCommit,
+    updateStatusColor = updateStatusColor,
+    shortIntegrityStatus = shortIntegrityStatus,
+    integrityStatusColor = integrityStatusColor,
+  })
 end
 
 local function drawUpdatePage(r)
-  local topRatio = ui.compact and 0.68 or 0.72
-  local top, actions = splitVertical(r, topRatio)
-  local statusRect, logRect
-
-  if ui.compact then
-    statusRect, logRect = splitVertical(top, 0.54)
-  else
-    statusRect, logRect = splitHorizontal(top, 0.52)
-  end
-
-  drawPanel(statusRect.x, statusRect.y, statusRect.w, statusRect.h, "MAJ STATUS")
-  local baseY = statusRect.y + sv(54)
-  local step = math.max(12, sv(16))
-  local statusRows = {
-    { label = "STATUS", value = state.update.remoteStatus, color = updateStatusColor(state.update.remoteStatus) },
-    { label = "DETAIL", value = state.update.statusDetail ~= "" and state.update.statusDetail or "-", color = C.muted },
-    { label = "INTEGRITY", value = state.update.integrityStatus, color = integrityStatusColor(state.update.integrityStatus) },
-    { label = "INTEGRITY DETAIL", value = state.update.integrityDetail ~= "" and state.update.integrityDetail or "-", color = state.update.integrityStatus == INTEGRITY_STATUS.OK and C.muted or integrityStatusColor(state.update.integrityStatus) },
-    { label = "LOCAL VERSION", value = state.update.localVersion, color = C.cyan },
-    { label = "REMOTE VERSION", value = state.update.remoteVersion, color = C.yellow },
-    { label = "CHANNEL", value = state.update.channel, color = C.text },
-    { label = "BRANCH", value = state.update.remoteBranch or "-", color = C.text },
-    { label = "REMOTE COMMIT", value = shortCommit(state.update.remoteCommit, 12), color = C.cyan },
-    { label = "FILES TO UPDATE", value = tostring(state.update.filesToUpdate), color = state.update.filesToUpdate > 0 and C.orange or C.green },
-    { label = "LAST CHECK", value = state.update.lastCheck, color = C.text },
-    { label = "LAST APPLY", value = state.update.lastApply, color = C.text },
-    { label = "LAST DOWNLOAD", value = state.update.lastDownload, color = C.text },
-    { label = "CHECK SUMMARY", value = state.update.lastCheckSummary, color = C.muted },
-    { label = "LAST ERROR", value = state.update.lastError == "none" and "-" or firstLine(state.update.lastError), color = state.update.lastError == "none" and C.muted or C.red },
-  }
-
-  local maxRows = math.max(4, math.floor((statusRect.h - sv(58)) / step))
-  local rowCount = math.min(maxRows, #statusRows)
-  for i = 1, rowCount do
-    local row = statusRows[i]
-    drawToggleRow(statusRect, baseY + step * (i - 1), row.label, row.value, row.color)
-  end
-
-  drawPanel(logRect.x, logRect.y, logRect.w, logRect.h, "MAJ LOG")
-  local logY = logRect.y + sv(54)
-  local maxLogLines = math.max(3, math.floor((logRect.h - sv(62)) / step))
-  local totalLines = #state.update.logs
-  local startIndex = math.max(1, totalLines - maxLogLines + 1)
-  local lineIndex = 0
-
-  if totalLines == 0 then
-    drawText(logRect.x + ui.pad, logY, "no update log yet", C.muted, 1)
-  else
-    for i = startIndex, totalLines do
-      local line = state.update.logs[i]
-      local low = string.lower(line)
-      local hasError = string.find(low, "failed", 1, true)
-        or string.find(low, "error", 1, true)
-        or string.find(low, "mismatch", 1, true)
-        or string.find(low, "invalid", 1, true)
-      local hasWarn = string.find(low, "warning", 1, true)
-      local hasHash = string.find(low, "hash ", 1, true)
-      local color = hasError and C.red or (hasWarn and C.orange or (hasHash and C.cyan or C.text))
-      drawText(logRect.x + ui.pad, logY + step * lineIndex, firstLine(line), color, 1)
-      lineIndex = lineIndex + 1
-    end
-  end
-
-  drawPanel(actions.x, actions.y, actions.w, actions.h, "MAJ ACTIONS")
-  local pad = ui.pad
-  local gap = ui.gap
-  local usableW = actions.w - pad * 2
-  local bh = math.max(ui.buttonH, sv(34))
-  local y1 = actions.y + sv(54)
-  local y2 = y1 + bh + sv(10)
-
-  local bw3 = math.floor((usableW - gap * 2) / 3)
-  local x1 = actions.x + pad
-  local x2 = x1 + bw3 + gap
-  local x3 = x2 + bw3 + gap
-
-  drawButton("UPDATE_CHECK", x1, y1, bw3, bh, "[CHECK]", "cyan", true)
-  drawButton("UPDATE_DOWNLOAD", x2, y1, bw3, bh, "[DOWNLOAD]", "purple", true)
-  drawButton("UPDATE_APPLY", x3, y1, bw3, bh, UPDATE_CFG.requireConfirmApply and (state.update.applyConfirmArmed and "[APPLY CONFIRM]" or "[APPLY]") or "[APPLY]", "green", state.update.downloaded)
-
-  local bw2 = math.floor((usableW - gap) / 2)
-  drawButton("UPDATE_ROLLBACK", x1, y2, bw2, bh, "[ROLLBACK]", "orange", state.update.canRollback)
-  drawButton("UPDATE_RESTART", x1 + bw2 + gap, y2, bw2, bh, "[RESTART]", "red", true)
+  UpdatePageView.draw({
+    rect = r,
+    ui = ui,
+    colors = C,
+    updateState = state.update,
+    requireConfirmApply = UPDATE_CFG.requireConfirmApply,
+    integrityStatusOk = INTEGRITY_STATUS.OK,
+    splitVertical = splitVertical,
+    splitHorizontal = splitHorizontal,
+    drawPanel = drawPanel,
+    drawToggleRow = drawToggleRow,
+    drawText = drawText,
+    drawButton = drawButton,
+    sv = sv,
+    firstLine = firstLine,
+    shortCommit = shortCommit,
+    updateStatusColor = updateStatusColor,
+    integrityStatusColor = integrityStatusColor,
+  })
 end
 
 local function drawImageStack(slotX, slotY, slotW, slotH, data, forcedLayout)
