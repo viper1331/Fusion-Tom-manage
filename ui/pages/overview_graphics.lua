@@ -3,6 +3,21 @@ local M = {}
 local ElectricFlowAnimation = assert(dofile("ui/animations/electric_flow.lua"))
 local ReactorCoreAnimation = assert(dofile("ui/animations/reactor_core.lua"))
 local GpuSafe = assert(dofile("ui/helpers/gpu_safe.lua"))
+local renderLogKeys = {}
+
+local function appendRuntimeLog(args, message)
+  local logger = args and args.appendUiRuntimeLog
+  if type(logger) == "function" then
+    logger(message)
+  end
+end
+
+local function appendRuntimeLogOnce(args, stage, key, message)
+  if renderLogKeys[stage] ~= key then
+    appendRuntimeLog(args, message)
+    renderLogKeys[stage] = key
+  end
+end
 
 local function drawImageSafe(args, img, x, y)
   if not img then
@@ -42,6 +57,19 @@ function M.drawImageStack(args)
   local chooseStackLayout = args.chooseStackLayout
   local drawTextCenter = args.drawTextCenter
   local textPixelHeight = args.textPixelHeight
+  local sceneMode = tostring(args.sceneMode or "none")
+  local reactorPresent = args.reactorPresent == true
+  local laserPresent = args.laserPresent == true
+  local reactorAssetName = tostring(args.reactorAssetName or "none")
+  local laserAssetName = tostring(args.laserAssetName or "none")
+  local fallbackReactorVariant = args.fallbackReactorVariant
+  local fallbackLaserVariant = args.fallbackLaserVariant
+  if (not reactorPresent) and fallbackReactorVariant then
+    reactorPresent = true
+  end
+  if (not laserPresent) and fallbackLaserVariant then
+    laserPresent = true
+  end
   local safeRect = function(x, y, w, h, color)
     GpuSafe.filledRect(args, x, y, w, h, color)
   end
@@ -51,11 +79,79 @@ function M.drawImageStack(args)
   end
 
   local configuredModuleCount = math.max(1, tonumber(control.laserModuleCount) or 1)
-  local layout = forcedLayout or chooseStackLayout(slotW, slotH, configuredModuleCount)
+  local layout = forcedLayout
+  if not layout or not layout.reactor then
+    layout = chooseStackLayout(slotW, slotH, configuredModuleCount)
+  end
+
+  if (not layout or not layout.reactor) and fallbackReactorVariant then
+    layout = {
+      reactor = fallbackReactorVariant,
+      module = nil,
+      moduleCount = 0,
+      configuredModuleCount = configuredModuleCount,
+      drawnModuleCount = 0,
+      moduleGap = math.max(1, math.floor(ui.smallPad * 0.45)),
+      allowOverflow = true,
+    }
+    local fallbackLayoutKey = table.concat({
+      tostring(slotW),
+      tostring(slotH),
+      tostring(fallbackReactorVariant.name or "runtime"),
+    }, "|")
+    appendRuntimeLogOnce(
+      args,
+      "overview_scene_fallback_layout",
+      fallbackLayoutKey,
+      "overview renderer fallback: promoting reactor-only layout from active reactor asset"
+        .. " reactorVariant=" .. tostring(fallbackReactorVariant.name or "runtime")
+    )
+  end
 
   safeRect(slotX, slotY, slotW, slotH, C.white)
 
+  local incomingKey = table.concat({
+    tostring(sceneMode),
+    tostring(reactorPresent),
+    tostring(laserPresent),
+    tostring(reactorAssetName),
+    tostring(laserAssetName),
+    tostring(layout and layout.reactor ~= nil),
+    tostring(layout and layout.module ~= nil),
+    tostring(slotW),
+    tostring(slotH),
+  }, "|")
+  appendRuntimeLogOnce(
+    args,
+    "overview_scene_incoming",
+    incomingKey,
+    "overview renderer incoming:"
+      .. " sceneMode=" .. tostring(sceneMode)
+      .. " reactorPresent=" .. tostring(reactorPresent and "yes" or "no")
+      .. " laserPresent=" .. tostring(laserPresent and "yes" or "no")
+      .. " reactorAsset=" .. tostring(reactorAssetName)
+      .. " laserAsset=" .. tostring(laserAssetName)
+      .. " layoutReactor=" .. tostring(layout and layout.reactor and "yes" or "no")
+      .. " layoutLaser=" .. tostring(layout and layout.module and "yes" or "no")
+  )
+
   if not layout or not layout.reactor then
+    local missingKey = table.concat({
+      tostring(sceneMode),
+      tostring(reactorPresent),
+      tostring(laserPresent),
+      tostring(slotW),
+      tostring(slotH),
+    }, "|")
+    appendRuntimeLogOnce(
+      args,
+      "overview_scene_missing",
+      missingKey,
+      "overview renderer final: sceneMode=none rendered=assets_missing"
+        .. " reactorPresent=" .. tostring(reactorPresent and "yes" or "no")
+        .. " laserPresent=" .. tostring(laserPresent and "yes" or "no")
+        .. " reason=no_reactor_layout"
+    )
     local ty = slotY + math.max(0, math.floor((slotH - textPixelHeight(1)) / 2))
     drawTextCenter(slotX, ty, slotW, "assets missing", C.muted, 1)
     return
@@ -82,6 +178,10 @@ function M.drawImageStack(args)
 
   local totalH = reactorVariant.height + ((moduleVariant and drawnModuleCount > 0) and (gap + modulesBlockH) or 0)
   local startY = slotY + math.floor((slotH - totalH) / 2)
+  if layout.allowOverflow then
+    local maxY = math.max(0, (ui.sh or slotH) - reactorVariant.height)
+    startY = math.max(0, math.min(startY, maxY))
+  end
 
   if moduleVariant and drawnModuleCount > 0 then
     for i = 1, drawnModuleCount do
@@ -91,17 +191,41 @@ function M.drawImageStack(args)
       drawModuleCableFluxAt(args, moduleX, moduleY, moduleVariant.width, moduleVariant.height, data)
     end
     startY = startY + modulesBlockH + gap
-  else
+  elseif not layout.allowOverflow then
     local moduleTextY = startY + math.max(0, math.floor((ui.smallPad + textPixelHeight(1)) / 2))
     drawTextCenter(slotX, moduleTextY, slotW, "LASER x" .. tostring(configuredCount), C.muted, 1)
     startY = startY + ui.smallPad + textPixelHeight(1) + ui.smallPad
   end
 
   local reactorX = slotX + math.floor((slotW - reactorVariant.width) / 2)
+  if layout.allowOverflow then
+    local maxX = math.max(0, (ui.sw or slotW) - reactorVariant.width)
+    reactorX = math.max(0, math.min(reactorX, maxX))
+  end
   drawImageSafe(args, reactorVariant.image, reactorX, startY)
   drawReactorCoreAnimationAt(args, reactorX, startY, reactorVariant.width, reactorVariant.height, data)
   drawReactorRightCableFluxAt(args, reactorX, startY, reactorVariant.width, reactorVariant.height, data)
   drawReactorBottomGasFluxAt(args, reactorX, startY, reactorVariant.width, reactorVariant.height, data)
+
+  local renderedMode = moduleVariant and drawnModuleCount > 0 and "pair" or "reactor-only"
+  local renderedKey = table.concat({
+    tostring(renderedMode),
+    tostring(reactorVariant and reactorVariant.name or "none"),
+    tostring(moduleVariant and moduleVariant.name or "none"),
+    tostring(layout.allowOverflow and "overflow" or "fit"),
+  }, "|")
+  appendRuntimeLogOnce(
+    args,
+    "overview_scene_rendered",
+    renderedKey,
+    "overview renderer final:"
+      .. " sceneMode=" .. tostring(renderedMode)
+      .. " reactorPresent=yes"
+      .. " laserPresent=" .. tostring(moduleVariant and drawnModuleCount > 0 and "yes" or "no")
+      .. " reactorVariant=" .. tostring(reactorVariant and reactorVariant.name or "none")
+      .. " laserVariant=" .. tostring(moduleVariant and moduleVariant.name or "none")
+      .. " overflow=" .. tostring(layout.allowOverflow and "yes" or "no")
+  )
 
   if configuredCount > drawnModuleCount then
     local badgeW = math.max(18, math.floor(slotW * 0.16))

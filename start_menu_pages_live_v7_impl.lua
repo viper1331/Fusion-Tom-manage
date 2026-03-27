@@ -334,6 +334,7 @@ local state = {
     screenSize = "n/a",
     reactorAsset = "none",
     moduleAsset = "none",
+    sceneMode = "none",
     lastAssetReason = "startup",
   },
 
@@ -856,6 +857,7 @@ local function loadScenePair(preferredTier)
 
   if not hasReactorTier then
     appendUiRuntimeLog("asset scene: no reactor tier available")
+    appendUiRuntimeLog("asset scene final: reactorLoaded=no laserLoaded=no reactorTier=none laserTier=none mode=none reason=no_reactor_tier_available")
     return nil, "no_reactor_tier_available"
   end
 
@@ -949,6 +951,12 @@ local function loadScenePair(preferredTier)
                     .. " module=" .. tostring(moduleVariant.name)
                     .. " usedFallback=" .. tostring(usedFallback)
                 )
+                appendUiRuntimeLog(
+                  "asset scene final: reactorLoaded=yes laserLoaded=yes"
+                    .. " reactorTier=" .. tostring(reactorTier)
+                    .. " laserTier=" .. tostring(moduleTier)
+                    .. " mode=pair reason=pair_selected"
+                )
 
                 return {
                   reactor = reactorSelected,
@@ -994,6 +1002,11 @@ local function loadScenePair(preferredTier)
         .. " requestedTier=" .. tostring(preferredTier)
         .. " class=no_pair_loaded"
     )
+    appendUiRuntimeLog(
+      "asset scene final: reactorLoaded=yes laserLoaded=no"
+        .. " reactorTier=" .. tostring(reactorFallback.reactorTier)
+        .. " laserTier=none mode=reactor-only reason=no_pair_loaded"
+    )
     return {
       reactor = reactorFallback.reactor,
       module = nil,
@@ -1007,6 +1020,10 @@ local function loadScenePair(preferredTier)
   end
 
   appendUiRuntimeLog("asset scene: no_pair_loaded (no reactor usable)")
+  appendUiRuntimeLog(
+    "asset scene final: reactorLoaded=no laserLoaded=no reactorTier=none laserTier=none"
+      .. " mode=none reason=" .. tostring(sawVramError and "no_scene_pair_vram" or "no_pair_loaded")
+  )
   return nil, sawVramError and "no_scene_pair_vram" or "no_pair_loaded"
 end
 
@@ -1045,17 +1062,21 @@ local function tryLoadAssets(reason)
     -- Atomic swap: keep active assets untouched until a complete scene decision is ready.
     images.reactorVariants = { scene.reactor }
     images.reactor = scene.reactor.image
+    local appliedSceneMode = "reactor-only"
 
     if scene.module then
       images.laserModuleVariants = { scene.module }
       images.laserModule = scene.module.image
+      appliedSceneMode = "pair"
     else
       images.laserModuleVariants = {}
       images.laserModule = nil
+      appliedSceneMode = "reactor-only"
     end
 
     state.visual.reactorAsset = scene.reactor.name
     state.visual.moduleAsset = scene.module and scene.module.name or "none"
+    state.visual.sceneMode = appliedSceneMode
     state.visual.vramFallback = scene.sawVramError or scene.usedFallback or scene.reactorOnly or false
     state.visual.lastAssetReason = reason
 
@@ -1067,15 +1088,30 @@ local function tryLoadAssets(reason)
         .. " reactorOnly=" .. tostring(scene.reactorOnly)
         .. " fallback=" .. tostring(scene.usedFallback)
     )
+    appendUiRuntimeLog(
+      "asset active scene: mode=" .. tostring(appliedSceneMode)
+        .. " reactorPresent=yes laserPresent=" .. tostring(scene.module and "yes" or "no")
+        .. " reactorAsset=" .. tostring(state.visual.reactorAsset)
+        .. " laserAsset=" .. tostring(state.visual.moduleAsset)
+    )
   else
     if hadPreviousVisual then
+      local preservedMode = hadPreviousModule and "pair" or "reactor-only"
       appendUiRuntimeLog(
         "asset reload failed, preserving previous visual state: "
           .. tostring(previousReactor) .. "/" .. tostring(previousModule)
           .. " reason=" .. tostring(loadErr)
       )
+      state.visual.sceneMode = preservedMode
       state.visual.vramFallback = true
       state.visual.lastAssetReason = reason .. ":preserve_previous"
+      appendUiRuntimeLog(
+        "asset active scene: mode=" .. tostring(preservedMode)
+          .. " reactorPresent=yes laserPresent=" .. tostring(hadPreviousModule and "yes" or "no")
+          .. " reactorAsset=" .. tostring(state.visual.reactorAsset)
+          .. " laserAsset=" .. tostring(state.visual.moduleAsset)
+          .. " reason=preserve_previous"
+      )
     else
       appendUiRuntimeLog("asset reload failed: no previous valid pair available, placeholder may be shown (reason=" .. tostring(loadErr) .. ")")
       images.reactorVariants = {}
@@ -1084,8 +1120,10 @@ local function tryLoadAssets(reason)
       images.laserModule = nil
       state.visual.reactorAsset = "none"
       state.visual.moduleAsset = "none"
+      state.visual.sceneMode = "none"
       state.visual.vramFallback = true
       state.visual.lastAssetReason = reason .. ":no_pair"
+      appendUiRuntimeLog("asset active scene: mode=none reactorPresent=no laserPresent=no reason=" .. tostring(loadErr or "no_pair"))
     end
   end
 
@@ -1126,6 +1164,8 @@ local function getFallbackLaserModuleVariant()
 
   return nil
 end
+
+local lastLayoutFallbackLogKey = nil
 
 local function chooseStackLayout(slotW, slotH, moduleCount)
   local gap = ui and ui.smallPad or 0
@@ -1194,7 +1234,30 @@ local function chooseStackLayout(slotW, slotH, moduleCount)
   end
 
   local fallbackReactor = getFallbackReactorVariant()
-  if fallbackReactor and fallbackReactor.width <= slotW and fallbackReactor.height <= slotH then
+  local screenFits = ui
+    and fallbackReactor
+    and fallbackReactor.width <= ui.sw
+    and fallbackReactor.height <= ui.sh
+  if fallbackReactor and screenFits then
+    local allowOverflow = fallbackReactor.width > slotW or fallbackReactor.height > slotH
+    local fallbackLogKey = table.concat({
+      tostring(fallbackReactor.name or "runtime"),
+      tostring(slotW),
+      tostring(slotH),
+      tostring(fallbackReactor.width),
+      tostring(fallbackReactor.height),
+      tostring(allowOverflow),
+    }, "|")
+    if fallbackLogKey ~= lastLayoutFallbackLogKey then
+      appendUiRuntimeLog(
+        "layout fallback: reactor-only selected"
+          .. " reactor=" .. tostring(fallbackReactor.name or "runtime")
+          .. " slot=" .. tostring(slotW) .. "x" .. tostring(slotH)
+          .. " reactorSize=" .. tostring(fallbackReactor.width) .. "x" .. tostring(fallbackReactor.height)
+          .. " overflow=" .. tostring(allowOverflow)
+      )
+      lastLayoutFallbackLogKey = fallbackLogKey
+    end
     return {
       reactor = fallbackReactor,
       module = nil,
@@ -1203,6 +1266,7 @@ local function chooseStackLayout(slotW, slotH, moduleCount)
       requiredW = fallbackReactor.width,
       requiredH = fallbackReactor.height,
       moduleGap = moduleGap,
+      allowOverflow = allowOverflow,
     }
   end
 
@@ -2769,6 +2833,17 @@ local function drawUpdatePage(r)
 end
 
 local function drawImageStack(slotX, slotY, slotW, slotH, data, forcedLayout)
+  local rendererSceneMode = state.visual.sceneMode
+  if rendererSceneMode ~= "pair" and rendererSceneMode ~= "reactor-only" and rendererSceneMode ~= "none" then
+    if images.reactor and images.laserModule then
+      rendererSceneMode = "pair"
+    elseif images.reactor then
+      rendererSceneMode = "reactor-only"
+    else
+      rendererSceneMode = "none"
+    end
+  end
+
   OverviewGraphicsView.drawImageStack({
     slotX = slotX,
     slotY = slotY,
@@ -2784,6 +2859,14 @@ local function drawImageStack(slotX, slotY, slotW, slotH, data, forcedLayout)
     chooseStackLayout = chooseStackLayout,
     drawTextCenter = drawTextCenter,
     textPixelHeight = textPixelHeight,
+    appendUiRuntimeLog = appendUiRuntimeLog,
+    sceneMode = rendererSceneMode,
+    reactorPresent = images.reactor ~= nil,
+    laserPresent = images.laserModule ~= nil,
+    reactorAssetName = state.visual.reactorAsset,
+    laserAssetName = state.visual.moduleAsset,
+    fallbackReactorVariant = getFallbackReactorVariant(),
+    fallbackLaserVariant = getFallbackLaserModuleVariant(),
   })
 end
 
