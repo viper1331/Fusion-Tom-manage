@@ -1,6 +1,6 @@
 {
     "name":  "Fusion-Tom-manage",
-    "version":  "1.2.20",
+    "version":  "1.2.21",
     "channel":  "stable",
     "entrypoint":  "start.lua",
     "source":  {
@@ -8,7 +8,7 @@
                    "repo":  "Fusion-Tom-manage",
                    "branch":  "main",
                    "manifestPath":  "fusion.manifest.json",
-                   "commit":  "e763367e38b827281e90f5e5f5ec6d74237a5c05"
+                   "commit":  "373003d647a0370494518e04c8439773211a2593"
                },
     "integrity":  {
                       "mode":  "hash+size",
@@ -41,7 +41,7 @@
                   {
                       "path":  "fusion.version",
                       "size":  6,
-                      "hash":  "b29cf0fa76cdef8bf0e29854ada44b39d766664ad46647196fc0baa3a7dd594f",
+                      "hash":  "c8411b1f37910b261a3d823b72a93d1982e737195f9468d4cf52e8c1181a1a3b",
                       "hashAlgo":  "sha256"
                   },
                   {
@@ -238,8 +238,8 @@
                   },
                   {
                       "path":  "ui/pages/overview_graphics.lua",
-                      "size":  4529,
-                      "hash":  "8f3c022e881dcc102a51f392626c03b6605e9b57886b0c05b888c0afc49d60b6",
+                      "size":  9037,
+                      "hash":  "2f65c2a7d5e9646ba626fd564d3ca185d3da9f5c6d7de4d4288594b43224841f",
                       "hashAlgo":  "sha256"
                   },
                   {
@@ -280,10 +280,10 @@
                   },
                   {
                       "path":  "start_menu_pages_live_v7_impl.lua",
-                      "size":  105599,
-                      "hash":  "dde7199e99fbdb51c542d1d01a0631046569dde038dd329178c00fbf7f6e5f83",
+                      "size":  109416,
+                      "hash":  "cf661de31c2086f1de18a4ec9dcbdb9761d860e8097d996fd8f6ee582214bc04",
                       "hashAlgo":  "sha256"
                   }
               ],
-    "commit":  "e763367e38b827281e90f5e5f5ec6d74237a5c05"
+    "commit":  "373003d647a0370494518e04c8439773211a2593"
 }
