@@ -84,7 +84,10 @@ function M.drawImageStack(args)
     layout = chooseStackLayout(slotW, slotH, configuredModuleCount)
   end
 
-  if (not layout or not layout.reactor) and fallbackReactorVariant then
+  if (not layout or not layout.reactor)
+    and fallbackReactorVariant
+    and fallbackReactorVariant.width <= slotW
+    and fallbackReactorVariant.height <= slotH then
     layout = {
       reactor = fallbackReactorVariant,
       module = nil,
@@ -92,7 +95,6 @@ function M.drawImageStack(args)
       configuredModuleCount = configuredModuleCount,
       drawnModuleCount = 0,
       moduleGap = math.max(1, math.floor(ui.smallPad * 0.45)),
-      allowOverflow = true,
     }
     local fallbackLayoutKey = table.concat({
       tostring(slotW),
@@ -105,6 +107,21 @@ function M.drawImageStack(args)
       fallbackLayoutKey,
       "overview renderer fallback: promoting reactor-only layout from active reactor asset"
         .. " reactorVariant=" .. tostring(fallbackReactorVariant.name or "runtime")
+    )
+  elseif (not layout or not layout.reactor) and fallbackReactorVariant then
+    local fallbackRejectKey = table.concat({
+      tostring(slotW),
+      tostring(slotH),
+      tostring(fallbackReactorVariant.width),
+      tostring(fallbackReactorVariant.height),
+    }, "|")
+    appendRuntimeLogOnce(
+      args,
+      "overview_scene_fallback_reject",
+      fallbackRejectKey,
+      "overview renderer fallback rejected: class=viewport_overflow"
+        .. " viewport=" .. tostring(slotW) .. "x" .. tostring(slotH)
+        .. " reactorSize=" .. tostring(fallbackReactorVariant.width) .. "x" .. tostring(fallbackReactorVariant.height)
     )
   end
 
@@ -178,10 +195,6 @@ function M.drawImageStack(args)
 
   local totalH = reactorVariant.height + ((moduleVariant and drawnModuleCount > 0) and (gap + modulesBlockH) or 0)
   local startY = slotY + math.floor((slotH - totalH) / 2)
-  if layout.allowOverflow then
-    local maxY = math.max(0, (ui.sh or slotH) - reactorVariant.height)
-    startY = math.max(0, math.min(startY, maxY))
-  end
 
   if moduleVariant and drawnModuleCount > 0 then
     for i = 1, drawnModuleCount do
@@ -191,17 +204,13 @@ function M.drawImageStack(args)
       drawModuleCableFluxAt(args, moduleX, moduleY, moduleVariant.width, moduleVariant.height, data)
     end
     startY = startY + modulesBlockH + gap
-  elseif not layout.allowOverflow then
+  else
     local moduleTextY = startY + math.max(0, math.floor((ui.smallPad + textPixelHeight(1)) / 2))
     drawTextCenter(slotX, moduleTextY, slotW, "LASER x" .. tostring(configuredCount), C.muted, 1)
     startY = startY + ui.smallPad + textPixelHeight(1) + ui.smallPad
   end
 
   local reactorX = slotX + math.floor((slotW - reactorVariant.width) / 2)
-  if layout.allowOverflow then
-    local maxX = math.max(0, (ui.sw or slotW) - reactorVariant.width)
-    reactorX = math.max(0, math.min(reactorX, maxX))
-  end
   drawImageSafe(args, reactorVariant.image, reactorX, startY)
   drawReactorCoreAnimationAt(args, reactorX, startY, reactorVariant.width, reactorVariant.height, data)
   drawReactorRightCableFluxAt(args, reactorX, startY, reactorVariant.width, reactorVariant.height, data)
@@ -212,7 +221,10 @@ function M.drawImageStack(args)
     tostring(renderedMode),
     tostring(reactorVariant and reactorVariant.name or "none"),
     tostring(moduleVariant and moduleVariant.name or "none"),
-    tostring(layout.allowOverflow and "overflow" or "fit"),
+    tostring(reactorVariant and reactorVariant.width or "n/a"),
+    tostring(reactorVariant and reactorVariant.height or "n/a"),
+    tostring(slotW),
+    tostring(slotH),
   }, "|")
   appendRuntimeLogOnce(
     args,
@@ -223,8 +235,10 @@ function M.drawImageStack(args)
       .. " reactorPresent=yes"
       .. " laserPresent=" .. tostring(moduleVariant and drawnModuleCount > 0 and "yes" or "no")
       .. " reactorVariant=" .. tostring(reactorVariant and reactorVariant.name or "none")
+      .. " reactorSize=" .. tostring(reactorVariant and reactorVariant.width or "n/a") .. "x" .. tostring(reactorVariant and reactorVariant.height or "n/a")
       .. " laserVariant=" .. tostring(moduleVariant and moduleVariant.name or "none")
-      .. " overflow=" .. tostring(layout.allowOverflow and "yes" or "no")
+      .. " laserSize=" .. tostring(moduleVariant and moduleVariant.width or "n/a") .. "x" .. tostring(moduleVariant and moduleVariant.height or "n/a")
+      .. " viewport=" .. tostring(slotW) .. "x" .. tostring(slotH)
   )
 
   if configuredCount > drawnModuleCount then

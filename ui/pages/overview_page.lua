@@ -135,27 +135,62 @@ local function drawOverviewInfoZone(args, zones)
   args.drawPanel(right.x, right.y, right.w, right.h, "POWER & FUEL")
   local px = right.x + ui.pad
   local pw = right.w - ui.pad * 2
-  local topY = right.y + sv(50)
-  local rowGap = sv(16)
-  local step = ui.gaugeH + rowGap
+  local topY = right.y + sv(46)
+  local rowGap = math.max(6, sv(10))
+  local toggleStep = sv(18)
+  local toggleRows = 4
+  local gaugeCount = 5
+  local minGaugeH = math.max(10, math.floor(ui.gaugeH * 0.72))
 
-  local availableH = right.h - sv(120)
-  local gaugeCount = availableH < (step * 5) and 4 or 5
-
-  args.drawGauge(px, topY, pw, ui.gaugeH, data.energyPct, C.green, "ENERGY", data.energyText)
-  args.drawGauge(px, topY + step, pw, ui.gaugeH, args.clamp(data.caseMK, 0, 100), C.orange, "CASE", tostring(args.round(data.caseMK, 1)) .. " MK")
-  args.drawGauge(px, topY + step * 2, pw, ui.gaugeH, data.dPct, C.green, "D", tostring(data.dPct) .. " %")
-  args.drawGauge(px, topY + step * 3, pw, ui.gaugeH, data.tPct, C.cyan, "T", tostring(data.tPct) .. " %")
-  if gaugeCount >= 5 then
-    args.drawGauge(px, topY + step * 4, pw, ui.gaugeH, data.dtPct, C.yellow, "DT", tostring(data.dtPct) .. " %")
+  local function computeGaugeCapacity(rows)
+    local topInset = topY - right.y
+    local toggleBlockH = rows * toggleStep + sv(4)
+    local bottomPad = sv(10)
+    local usable = right.h - topInset - toggleBlockH - bottomPad
+    return usable, toggleBlockH
   end
 
-  local fy = right.y + right.h - (gaugeCount >= 5 and sv(72) or sv(54))
+  local usableH, toggleBlockH = computeGaugeCapacity(toggleRows)
+  while gaugeCount > 3 and usableH < (minGaugeH * gaugeCount + rowGap * math.max(0, gaugeCount - 1)) do
+    gaugeCount = gaugeCount - 1
+    toggleRows = gaugeCount >= 5 and 4 or 3
+    usableH, toggleBlockH = computeGaugeCapacity(toggleRows)
+  end
+
+  local gaugeH = ui.gaugeH
+  local requiredGaugeH = gaugeCount * gaugeH + rowGap * math.max(0, gaugeCount - 1)
+  if requiredGaugeH > usableH then
+    local availableForGauges = math.max(gaugeCount * minGaugeH, usableH - rowGap * math.max(0, gaugeCount - 1))
+    gaugeH = math.max(minGaugeH, math.floor(availableForGauges / gaugeCount))
+  end
+  local step = gaugeH + rowGap
+
+  local gaugeRows = {
+    { label = "ENERGY", value = data.energyPct, color = C.green, text = data.energyText },
+    { label = "CASE", value = args.clamp(data.caseMK, 0, 100), color = C.orange, text = tostring(args.round(data.caseMK, 1)) .. " MK" },
+    { label = "D", value = data.dPct, color = C.green, text = tostring(data.dPct) .. " %" },
+    { label = "T", value = data.tPct, color = C.cyan, text = tostring(data.tPct) .. " %" },
+    { label = "DT", value = data.dtPct, color = C.yellow, text = tostring(data.dtPct) .. " %" },
+  }
+
+  for idx = 1, gaugeCount do
+    local row = gaugeRows[idx]
+    args.drawGauge(px, topY + (idx - 1) * step, pw, gaugeH, row.value, row.color, row.label, row.text)
+  end
+
+  local gaugeBottom = topY + (gaugeCount - 1) * step + gaugeH
+  local minFy = gaugeBottom + sv(8)
+  local maxFy = right.y + right.h - toggleBlockH
+  local fy = minFy
+  if fy > maxFy then
+    fy = maxFy
+  end
+
   args.drawToggleRow(right, fy, "INJECTION", data.injection, C.text)
-  args.drawToggleRow(right, fy + sv(18), "PRODUCTION", data.productionText, C.green)
-  args.drawToggleRow(right, fy + sv(36), "LOGIC", data.logicMode, C.cyan)
-  if gaugeCount >= 5 then
-    args.drawToggleRow(right, fy + sv(54), "LASER", data.laserReady and "READY" or "NOT READY", data.laserReady and C.green or C.red)
+  args.drawToggleRow(right, fy + toggleStep, "PRODUCTION", data.productionText, C.green)
+  args.drawToggleRow(right, fy + toggleStep * 2, "LOGIC", data.logicMode, C.cyan)
+  if toggleRows >= 4 then
+    args.drawToggleRow(right, fy + toggleStep * 3, "LASER", data.laserReady and "READY" or "NOT READY", data.laserReady and C.green or C.red)
   end
 end
 

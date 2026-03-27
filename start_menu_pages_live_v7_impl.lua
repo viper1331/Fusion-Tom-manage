@@ -656,6 +656,57 @@ local function preferredSceneTier()
   return "medium"
 end
 
+local function estimateOverviewSceneViewport()
+  if not ui or not ui.layout or not ui.layout.body then
+    return nil, nil
+  end
+
+  local body = ui.layout.body
+  local alertsH = math.max(62, sv(72))
+  local mainW = math.max(1, body.w)
+  local mainH = math.max(1, body.h - alertsH - ui.gap)
+  local infoMinW = ui.compact and math.max(110, math.floor(mainW * 0.45)) or math.max(140, math.floor(mainW * 0.28))
+  local candidateRatios = ui.compact and { 0.72, 0.66, 0.60, 0.56, 0.52 } or { 0.64, 0.60, 0.56, 0.52, 0.50, 0.48 }
+
+  for _, ratio in ipairs(candidateRatios) do
+    local leftW
+    local leftH
+    local rightW
+    local rightH
+    if ui.compact then
+      local splitH = math.floor((mainH - ui.gap) * ratio)
+      leftW = mainW
+      leftH = splitH
+      rightW = mainW
+      rightH = mainH - splitH - ui.gap
+    else
+      local splitW = math.floor((mainW - ui.gap) * ratio)
+      leftW = splitW
+      leftH = mainH
+      rightW = mainW - splitW - ui.gap
+      rightH = mainH
+    end
+
+    local innerW = leftW - ui.pad * 2 - 2
+    local innerH = leftH - sv(46) - 2
+    if innerW > 8 and innerH > 8 and (ui.compact or rightW >= infoMinW) and rightH >= math.max(120, sv(160)) then
+      return innerW, innerH
+    end
+  end
+
+  local fallbackLeftW
+  local fallbackLeftH
+  if ui.compact then
+    fallbackLeftW = mainW
+    fallbackLeftH = math.floor((mainH - ui.gap) * 0.66)
+  else
+    fallbackLeftW = math.floor((mainW - ui.gap) * 0.60)
+    fallbackLeftH = mainH
+  end
+
+  return math.max(8, fallbackLeftW - ui.pad * 2 - 2), math.max(8, fallbackLeftH - sv(46) - 2)
+end
+
 local function buildTierVariantMap(variants, kindLabel)
   local map = {}
   for _, variant in ipairs(variants or {}) do
@@ -768,12 +819,50 @@ local function isTierPairCompatible(reactorTier, moduleTier)
   return math.abs(reactorIndex - moduleIndex) <= 2
 end
 
-local function shouldReplaceReactorFallback(currentFallback, candidateFallback, preferredTier)
+local function reactorFitsViewport(reactorVariant, viewportW, viewportH)
+  if not reactorVariant then
+    return false
+  end
+  if not viewportW or not viewportH then
+    return true
+  end
+  return reactorVariant.width <= viewportW and reactorVariant.height <= viewportH
+end
+
+local function pairFitsViewport(reactorVariant, moduleVariant, viewportW, viewportH)
+  if not reactorVariant then
+    return false, 0, 0
+  end
+
+  local gap = ui and ui.smallPad or 0
+  local moduleGap = math.max(1, math.floor((ui and ui.smallPad or 0) * 0.45))
+  local requiredW = reactorVariant.width
+  local requiredH = reactorVariant.height
+
+  if moduleVariant then
+    requiredW = math.max(requiredW, moduleVariant.width)
+    requiredH = requiredH + gap + moduleVariant.height + moduleGap * 0
+  end
+
+  if not viewportW or not viewportH then
+    return true, requiredW, requiredH
+  end
+
+  return requiredW <= viewportW and requiredH <= viewportH, requiredW, requiredH
+end
+
+local function shouldReplaceReactorFallback(currentFallback, candidateFallback, preferredTier, viewportW, viewportH)
   if not candidateFallback or not candidateFallback.reactor then
     return false
   end
   if not currentFallback or not currentFallback.reactor then
     return true
+  end
+
+  local currentFits = reactorFitsViewport(currentFallback.reactor, viewportW, viewportH)
+  local candidateFits = reactorFitsViewport(candidateFallback.reactor, viewportW, viewportH)
+  if currentFits ~= candidateFits then
+    return candidateFits
   end
 
   local preferredIndex = ASSET_TIER_INDEX[preferredTier] or ASSET_TIER_INDEX.small2
@@ -838,7 +927,7 @@ local function tryDecodeVariant(kindLabel, variant)
   return nil, logAssetLoadFailure(kindLabel, variant, err)
 end
 
-local function loadScenePair(preferredTier)
+local function loadScenePair(preferredTier, viewportW, viewportH)
   local reactorVariants = normalizeAssetVariants(ASSET_REACTOR_VARIANTS, "reactor")
   local moduleVariants = normalizeAssetVariants(ASSET_LASER_MODULE_VARIANTS, "laser_module")
   local reactorByTier = buildTierVariantMap(reactorVariants, "reactor")
@@ -865,6 +954,7 @@ local function loadScenePair(preferredTier)
   appendUiRuntimeLog(
     "asset scene: requestedReactorTier=" .. tostring(preferredTier)
       .. " hasModuleTier=" .. tostring(hasModuleTier)
+      .. " viewport=" .. tostring(viewportW or "n/a") .. "x" .. tostring(viewportH or "n/a")
       .. " pairCandidates=" .. tostring(#pairCandidates)
   )
 
@@ -906,7 +996,7 @@ local function loadScenePair(preferredTier)
           reactorTier = reactorTier,
           requestedTier = preferredTier,
         }
-        if shouldReplaceReactorFallback(reactorFallback, fallbackCandidate, preferredTier) then
+        if shouldReplaceReactorFallback(reactorFallback, fallbackCandidate, preferredTier, viewportW, viewportH) then
           reactorFallback = fallbackCandidate
         end
 
@@ -937,37 +1027,51 @@ local function loadScenePair(preferredTier)
 
               local moduleSelected, moduleErrClass = tryDecodeVariant("laser_module", moduleVariant)
               if moduleSelected then
-                local usedFallback = (reactorTier ~= preferredTier) or (moduleTier ~= reactorTier)
-                if moduleTier ~= reactorTier then
+                local pairFits, pairRequiredW, pairRequiredH = pairFitsViewport(reactorSelected, moduleSelected, viewportW, viewportH)
+                if not pairFits then
                   appendUiRuntimeLog(
-                    "asset pair selected: module fallback chosen"
-                      .. " requested=" .. tostring(reactorTier)
-                      .. " selected=" .. tostring(moduleTier)
+                    "asset pair rejected: class=viewport_overflow"
+                      .. " reactorVariant=" .. tostring(reactorVariant.name)
+                      .. " moduleVariant=" .. tostring(moduleVariant.name)
+                      .. " viewport=" .. tostring(viewportW or "n/a") .. "x" .. tostring(viewportH or "n/a")
+                      .. " required=" .. tostring(pairRequiredW) .. "x" .. tostring(pairRequiredH)
                   )
+                  moduleSelected = nil
+                  pcall(collectgarbage, "collect")
+                else
+                  local usedFallback = (reactorTier ~= preferredTier) or (moduleTier ~= reactorTier)
+                  if moduleTier ~= reactorTier then
+                    appendUiRuntimeLog(
+                      "asset pair selected: module fallback chosen"
+                        .. " requested=" .. tostring(reactorTier)
+                        .. " selected=" .. tostring(moduleTier)
+                    )
+                  end
+
+                  appendUiRuntimeLog(
+                    "asset pair selected: reactor=" .. tostring(reactorVariant.name)
+                      .. " module=" .. tostring(moduleVariant.name)
+                      .. " usedFallback=" .. tostring(usedFallback)
+                  )
+                  appendUiRuntimeLog(
+                    "asset scene final: reactorLoaded=yes laserLoaded=yes"
+                      .. " reactorTier=" .. tostring(reactorTier)
+                      .. " laserTier=" .. tostring(moduleTier)
+                      .. " viewport=" .. tostring(viewportW or "n/a") .. "x" .. tostring(viewportH or "n/a")
+                      .. " mode=pair reason=pair_selected"
+                  )
+
+                  return {
+                    reactor = reactorSelected,
+                    module = moduleSelected,
+                    reactorTier = reactorTier,
+                    moduleTier = moduleTier,
+                    requestedTier = preferredTier,
+                    usedFallback = usedFallback,
+                    sawVramError = sawVramError,
+                    reactorOnly = false,
+                  }, nil
                 end
-
-                appendUiRuntimeLog(
-                  "asset pair selected: reactor=" .. tostring(reactorVariant.name)
-                    .. " module=" .. tostring(moduleVariant.name)
-                    .. " usedFallback=" .. tostring(usedFallback)
-                )
-                appendUiRuntimeLog(
-                  "asset scene final: reactorLoaded=yes laserLoaded=yes"
-                    .. " reactorTier=" .. tostring(reactorTier)
-                    .. " laserTier=" .. tostring(moduleTier)
-                    .. " mode=pair reason=pair_selected"
-                )
-
-                return {
-                  reactor = reactorSelected,
-                  module = moduleSelected,
-                  reactorTier = reactorTier,
-                  moduleTier = moduleTier,
-                  requestedTier = preferredTier,
-                  usedFallback = usedFallback,
-                  sawVramError = sawVramError,
-                  reactorOnly = false,
-                }, nil
               end
 
               if moduleErrClass == "vram_alloc_failed" then
@@ -996,6 +1100,22 @@ local function loadScenePair(preferredTier)
   end
 
   if reactorFallback and reactorFallback.reactor then
+    local reactorFits, reactorRequiredW, reactorRequiredH = pairFitsViewport(reactorFallback.reactor, nil, viewportW, viewportH)
+    if not reactorFits then
+      appendUiRuntimeLog(
+        "asset scene: reactor fallback rejected"
+          .. " class=viewport_overflow"
+          .. " viewport=" .. tostring(viewportW or "n/a") .. "x" .. tostring(viewportH or "n/a")
+          .. " required=" .. tostring(reactorRequiredW) .. "x" .. tostring(reactorRequiredH)
+      )
+      appendUiRuntimeLog(
+        "asset scene final: reactorLoaded=no laserLoaded=no reactorTier=none laserTier=none"
+          .. " viewport=" .. tostring(viewportW or "n/a") .. "x" .. tostring(viewportH or "n/a")
+          .. " mode=none reason=reactor_overflow"
+      )
+      return nil, "reactor_overflow"
+    end
+
     appendUiRuntimeLog(
       "asset scene: no full pair loaded, using reactor-only fallback"
         .. " reactorTier=" .. tostring(reactorFallback.reactorTier)
@@ -1005,7 +1125,9 @@ local function loadScenePair(preferredTier)
     appendUiRuntimeLog(
       "asset scene final: reactorLoaded=yes laserLoaded=no"
         .. " reactorTier=" .. tostring(reactorFallback.reactorTier)
-        .. " laserTier=none mode=reactor-only reason=no_pair_loaded"
+        .. " laserTier=none"
+        .. " viewport=" .. tostring(viewportW or "n/a") .. "x" .. tostring(viewportH or "n/a")
+        .. " mode=reactor-only reason=no_pair_loaded"
     )
     return {
       reactor = reactorFallback.reactor,
@@ -1022,6 +1144,7 @@ local function loadScenePair(preferredTier)
   appendUiRuntimeLog("asset scene: no_pair_loaded (no reactor usable)")
   appendUiRuntimeLog(
     "asset scene final: reactorLoaded=no laserLoaded=no reactorTier=none laserTier=none"
+      .. " viewport=" .. tostring(viewportW or "n/a") .. "x" .. tostring(viewportH or "n/a")
       .. " mode=none reason=" .. tostring(sawVramError and "no_scene_pair_vram" or "no_pair_loaded")
   )
   return nil, sawVramError and "no_scene_pair_vram" or "no_pair_loaded"
@@ -1049,15 +1172,17 @@ local function tryLoadAssets(reason)
   local previousReactor = hadPreviousReactor and tostring(state.visual.reactorAsset or "runtime") or "none"
   local previousModule = hadPreviousModule and tostring(state.visual.moduleAsset or "runtime") or "none"
   local requestedTier = preferredSceneTier()
+  local viewportW, viewportH = estimateOverviewSceneViewport()
 
   appendUiRuntimeLog(
     "asset reload start: reason=" .. reason
       .. ", screen=" .. screen
       .. ", requestedTier=" .. tostring(requestedTier)
+      .. ", viewport=" .. tostring(viewportW or "n/a") .. "x" .. tostring(viewportH or "n/a")
       .. ", previousPair=" .. tostring(previousReactor) .. "/" .. tostring(previousModule)
   )
 
-  local scene, loadErr = loadScenePair(requestedTier)
+  local scene, loadErr = loadScenePair(requestedTier, viewportW, viewportH)
   if scene and scene.reactor then
     -- Atomic swap: keep active assets untouched until a complete scene decision is ready.
     images.reactorVariants = { scene.reactor }
@@ -1166,6 +1291,7 @@ local function getFallbackLaserModuleVariant()
 end
 
 local lastLayoutFallbackLogKey = nil
+local lastLayoutFallbackRejectLogKey = nil
 
 local function chooseStackLayout(slotW, slotH, moduleCount)
   local gap = ui and ui.smallPad or 0
@@ -1234,19 +1360,15 @@ local function chooseStackLayout(slotW, slotH, moduleCount)
   end
 
   local fallbackReactor = getFallbackReactorVariant()
-  local screenFits = ui
-    and fallbackReactor
-    and fallbackReactor.width <= ui.sw
-    and fallbackReactor.height <= ui.sh
-  if fallbackReactor and screenFits then
-    local allowOverflow = fallbackReactor.width > slotW or fallbackReactor.height > slotH
+  local slotFits = fallbackReactor and fallbackReactor.width <= slotW and fallbackReactor.height <= slotH
+  if fallbackReactor and slotFits then
     local fallbackLogKey = table.concat({
       tostring(fallbackReactor.name or "runtime"),
       tostring(slotW),
       tostring(slotH),
       tostring(fallbackReactor.width),
       tostring(fallbackReactor.height),
-      tostring(allowOverflow),
+      "fit",
     }, "|")
     if fallbackLogKey ~= lastLayoutFallbackLogKey then
       appendUiRuntimeLog(
@@ -1254,7 +1376,7 @@ local function chooseStackLayout(slotW, slotH, moduleCount)
           .. " reactor=" .. tostring(fallbackReactor.name or "runtime")
           .. " slot=" .. tostring(slotW) .. "x" .. tostring(slotH)
           .. " reactorSize=" .. tostring(fallbackReactor.width) .. "x" .. tostring(fallbackReactor.height)
-          .. " overflow=" .. tostring(allowOverflow)
+          .. " overflow=false"
       )
       lastLayoutFallbackLogKey = fallbackLogKey
     end
@@ -1266,8 +1388,22 @@ local function chooseStackLayout(slotW, slotH, moduleCount)
       requiredW = fallbackReactor.width,
       requiredH = fallbackReactor.height,
       moduleGap = moduleGap,
-      allowOverflow = allowOverflow,
     }
+  elseif fallbackReactor then
+    local rejectLogKey = table.concat({
+      tostring(slotW),
+      tostring(slotH),
+      tostring(fallbackReactor.width),
+      tostring(fallbackReactor.height),
+    }, "|")
+    if rejectLogKey ~= lastLayoutFallbackRejectLogKey then
+      appendUiRuntimeLog(
+        "layout fallback rejected: class=viewport_overflow"
+          .. " slot=" .. tostring(slotW) .. "x" .. tostring(slotH)
+          .. " reactorSize=" .. tostring(fallbackReactor.width) .. "x" .. tostring(fallbackReactor.height)
+      )
+      lastLayoutFallbackRejectLogKey = rejectLogKey
+    end
   end
 
   return nil
