@@ -662,49 +662,21 @@ local function estimateOverviewSceneViewport()
   end
 
   local body = ui.layout.body
-  local alertsH = math.max(62, sv(72))
+  if ui.micro then
+    local statsH = math.max(18, math.floor(body.h * 0.10))
+    local imageH = math.max(20, body.h - statsH - ui.gap)
+    if imageH + ui.gap >= body.h then
+      imageH = body.h
+    end
+    return math.max(8, body.w - 2), math.max(8, imageH - 2)
+  end
+
+  local alertsH = ui.compact and math.max(28, sv(34)) or math.max(34, sv(42))
   local mainW = math.max(1, body.w)
   local mainH = math.max(1, body.h - alertsH - ui.gap)
-  local infoMinW = ui.compact and math.max(110, math.floor(mainW * 0.45)) or math.max(140, math.floor(mainW * 0.28))
-  local candidateRatios = ui.compact and { 0.72, 0.66, 0.60, 0.56, 0.52 } or { 0.64, 0.60, 0.56, 0.52, 0.50, 0.48 }
-
-  for _, ratio in ipairs(candidateRatios) do
-    local leftW
-    local leftH
-    local rightW
-    local rightH
-    if ui.compact then
-      local splitH = math.floor((mainH - ui.gap) * ratio)
-      leftW = mainW
-      leftH = splitH
-      rightW = mainW
-      rightH = mainH - splitH - ui.gap
-    else
-      local splitW = math.floor((mainW - ui.gap) * ratio)
-      leftW = splitW
-      leftH = mainH
-      rightW = mainW - splitW - ui.gap
-      rightH = mainH
-    end
-
-    local innerW = leftW - ui.pad * 2 - 2
-    local innerH = leftH - sv(46) - 2
-    if innerW > 8 and innerH > 8 and (ui.compact or rightW >= infoMinW) and rightH >= math.max(120, sv(160)) then
-      return innerW, innerH
-    end
-  end
-
-  local fallbackLeftW
-  local fallbackLeftH
-  if ui.compact then
-    fallbackLeftW = mainW
-    fallbackLeftH = math.floor((mainH - ui.gap) * 0.66)
-  else
-    fallbackLeftW = math.floor((mainW - ui.gap) * 0.60)
-    fallbackLeftH = mainH
-  end
-
-  return math.max(8, fallbackLeftW - ui.pad * 2 - 2), math.max(8, fallbackLeftH - sv(46) - 2)
+  local innerW = mainW - ui.pad * 2 - 2
+  local innerH = mainH - sv(40) - 2
+  return math.max(8, innerW), math.max(8, innerH)
 end
 
 local function buildTierVariantMap(variants, kindLabel)
@@ -1552,6 +1524,14 @@ local function buildUI()
 
   local micro = sw <= 160 or sh <= 340
   local compact = micro or sw < 760 or (sw / sh) < 0.72
+  local overviewPriority = (state.page == "OVERVIEW")
+
+  local headerH = micro and math.max(24, math.floor(28 * scale + 0.5)) or math.max(56, math.floor(72 * scale + 0.5))
+  local footerH = micro and 0 or math.max(52, math.floor(58 * scale + 0.5))
+  if not micro and overviewPriority then
+    headerH = compact and math.max(38, math.floor(46 * scale + 0.5)) or math.max(44, math.floor(52 * scale + 0.5))
+    footerH = compact and math.max(24, math.floor(28 * scale + 0.5)) or math.max(28, math.floor(34 * scale + 0.5))
+  end
 
   ui = {
     sw = sw,
@@ -1565,9 +1545,9 @@ local function buildUI()
     pad = micro and math.max(3, math.floor(5 * scale + 0.5)) or math.max(8, math.floor(12 * scale + 0.5)),
     smallPad = micro and math.max(1, math.floor(3 * scale + 0.5)) or math.max(6, math.floor(8 * scale + 0.5)),
 
-    headerH = micro and math.max(24, math.floor(28 * scale + 0.5)) or math.max(56, math.floor(72 * scale + 0.5)),
+    headerH = headerH,
     navH = micro and 0 or math.max(30, math.floor(38 * scale + 0.5)),
-    footerH = micro and 0 or math.max(52, math.floor(58 * scale + 0.5)),
+    footerH = footerH,
     buttonH = micro and math.max(16, math.floor(20 * scale + 0.5)) or math.max(28, math.floor(34 * scale + 0.5)),
     gaugeH = micro and math.max(8, math.floor(10 * scale + 0.5)) or math.max(14, math.floor(18 * scale + 0.5)),
 
@@ -2824,17 +2804,29 @@ end
 -- === Rendering ===
 local function drawHeader(r, data)
   drawPanel(r.x, r.y, r.w, r.h, nil)
-  drawTextCenter(r.x, r.y + sv(10), r.w, data.unitName, C.text, ui.headerTitleSize)
+  local titleY = r.y + math.max(1, math.floor(r.h * 0.10))
+  drawTextCenter(r.x, titleY, r.w, data.unitName, C.text, ui.headerTitleSize)
 
   local capsuleX = r.x + ui.pad
   local capsuleW = r.w - ui.pad * 2
-  local capsuleY = r.y + math.floor(r.h * 0.55)
-  local capsuleH = math.max(16, sv(18))
+  local capsuleH = math.max(12, math.min(math.floor(r.h * 0.45), sv(18)))
+  local capsuleY = r.y + r.h - capsuleH - math.max(1, ui.smallPad)
+  local minCapsuleY = titleY + textPixelHeight(ui.headerTitleSize) + 1
+  if capsuleY < minCapsuleY then
+    capsuleY = minCapsuleY
+  end
   local stateColor = chooseStateColor(data)
 
   gpu.filledRectangle(capsuleX, capsuleY, capsuleW, capsuleH, C.panel2)
   gpu.rectangle(capsuleX, capsuleY, capsuleW, capsuleH, C.border)
-  drawTextCenter(capsuleX, capsuleY + 3, capsuleW, data.stateText, stateColor, 1)
+  drawTextCenter(
+    capsuleX,
+    capsuleY + math.max(0, math.floor((capsuleH - textPixelHeight(1)) / 2)),
+    capsuleW,
+    data.stateText,
+    stateColor,
+    1
+  )
 end
 
 local function drawNav(r)
@@ -2849,6 +2841,17 @@ local function drawNav(r)
 end
 
 local function drawFooter(r, data)
+  local compactOverview = (state.page == "OVERVIEW")
+  if compactOverview then
+    drawPanel(r.x, r.y, r.w, r.h, nil)
+    local leftX = r.x + ui.pad
+    local rightX = r.x + r.w - ui.pad
+    local y = r.y + math.max(1, math.floor((r.h - textPixelHeight(1)) / 2))
+    drawText(leftX, y, "INFO", C.text, 1)
+    drawTextRight(rightX, y, getDataSummary(data), data.alerts == "none" and C.green or C.orange, 1)
+    return
+  end
+
   drawPanel(r.x, r.y, r.w, r.h, "STATUS BAR")
 
   local leftX = r.x + ui.pad
@@ -2886,8 +2889,12 @@ end
 local function drawMicroOverview(r, data)
   drawPanel(r.x, r.y, r.w, r.h, nil)
 
-  local statsH = math.max(44, math.floor(r.h * 0.16))
-  local imageH = r.h - statsH - ui.gap
+  local statsH = math.max(18, math.floor(r.h * 0.10))
+  local imageH = math.max(20, r.h - statsH - ui.gap)
+  if imageH + ui.gap >= r.h then
+    statsH = 0
+    imageH = r.h
+  end
 
   local imageRect = {
     x = r.x,
@@ -2906,24 +2913,15 @@ local function drawMicroOverview(r, data)
   gpu.filledRectangle(imageRect.x, imageRect.y, imageRect.w, imageRect.h, C.white)
   drawImageStack(imageRect.x + 1, imageRect.y + 1, imageRect.w - 2, imageRect.h - 2, data)
 
-  gpu.filledRectangle(statsRect.x, statsRect.y, statsRect.w, statsRect.h, C.panel)
-  gpu.rectangle(statsRect.x, statsRect.y, statsRect.w, statsRect.h, C.border)
+  if statsH > 0 then
+    gpu.filledRectangle(statsRect.x, statsRect.y, statsRect.w, statsRect.h, C.panel)
+    gpu.rectangle(statsRect.x, statsRect.y, statsRect.w, statsRect.h, C.border)
 
-  local y = statsRect.y + 4
-  drawText(statsRect.x + ui.pad, y, "P", C.text, 1)
-  drawTextRight(statsRect.x + statsRect.w - ui.pad, y, tostring(round(data.plasmaMK, 0)) .. " MK", C.text, 1)
-
-  y = y + 12
-  drawText(statsRect.x + ui.pad, y, "E", C.text, 1)
-  drawTextRight(statsRect.x + statsRect.w - ui.pad, y, tostring(math.floor(data.energyPct or 0)) .. "%", C.green, 1)
-
-  y = y + 12
-  drawText(statsRect.x + ui.pad, y, "DT", C.text, 1)
-  drawTextRight(statsRect.x + statsRect.w - ui.pad, y, tostring(math.floor(data.dtPct or 0)) .. "%", C.yellow, 1)
-
-  y = y + 12
-  drawText(statsRect.x + ui.pad, y, "LG", C.text, 1)
-  drawTextRight(statsRect.x + statsRect.w - ui.pad, y, data.logicMode or "UNK", C.cyan, 1)
+    local y = statsRect.y + math.max(1, math.floor((statsRect.h - textPixelHeight(1)) / 2))
+    local summary = "E " .. tostring(math.floor(data.energyPct or 0)) .. "%  DT " .. tostring(math.floor(data.dtPct or 0)) .. "%"
+    drawText(statsRect.x + ui.pad, y, summary, C.text, 1)
+    drawTextRight(statsRect.x + statsRect.w - ui.pad, y, data.logicMode or "UNK", C.cyan, 1)
+  end
 end
 
 local function drawMicroMajPage(r, data)
@@ -3032,6 +3030,7 @@ local function drawOverviewPage(r, data)
     clamp = clamp,
     round = round,
     textPixelHeight = textPixelHeight,
+    appendUiRuntimeLog = appendUiRuntimeLog,
   })
 end
 
