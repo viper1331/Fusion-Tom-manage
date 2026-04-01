@@ -232,13 +232,18 @@ end
 local function formatPortStatus(profile, channelKey, isOpen)
   local stateText = isOpen and profile.portStateOpen or profile.portStateClosed
   local name = profile.portNames[channelKey] or string.upper(channelKey)
-  if profile.mode == "micro" then
-    return name .. " " .. stateText
-  end
   return name .. " " .. stateText
 end
 
-local function drawLeaderLabel(args, spec)
+local function safeTextWidth(gpu, text, size)
+  local ok, value = pcall(gpu.getTextLength, text, size, 0)
+  if ok and type(value) == "number" and value > 0 then
+    return math.floor(value)
+  end
+  return math.max(1, (#text) * (6 * math.max(1, size)))
+end
+
+local function drawCalloutLabel(args, spec)
   local gpu = args and args.gpu
   if not gpu then
     return
@@ -250,36 +255,30 @@ local function drawLeaderLabel(args, spec)
   end
 
   local size = math.max(1, math.floor(spec.size or 1))
-  local padX = math.max(1, math.floor(spec.padX or 2))
-  local padY = math.max(0, math.floor(spec.padY or 1))
-  local textW = math.max(1, gpu.getTextLength(text, size, 0))
+  local textW = safeTextWidth(gpu, text, size)
   local textH = math.max(1, spec.textPixelHeight and spec.textPixelHeight(size) or (8 * size))
-  local boxW = textW + (padX * 2)
-  local boxH = textH + (padY * 2)
 
   local minX = spec.slotX + 1
   local minY = spec.slotY + 1
-  local maxX = spec.slotX + spec.slotW - boxW - 1
-  local maxY = spec.slotY + spec.slotH - boxH - 1
+  local maxX = spec.slotX + spec.slotW - textW - 1
+  local maxY = spec.slotY + spec.slotH - textH - 1
   if maxX < minX or maxY < minY then
     return
   end
 
-  local requestedX = math.floor(spec.labelX)
-  local requestedY = math.floor(spec.labelY)
-  local labelX = clampValue(requestedX, minX, maxX)
-  local labelY = clampValue(requestedY, minY, maxY)
-  local labelTargetX = (spec.side == "left") and (labelX + boxW - 1) or labelX
-  local labelTargetY = labelY + math.floor(boxH / 2)
+  local requestedX = math.floor(spec.textX)
+  local requestedY = math.floor(spec.textY)
+  local textX = clampValue(requestedX, minX, maxX)
+  local textY = clampValue(requestedY, minY, maxY)
   local annotationName = tostring(spec.name or "annotation")
 
-  if labelX ~= requestedX or labelY ~= requestedY then
+  if textX ~= requestedX or textY ~= requestedY then
     local clampKey = table.concat({
       annotationName,
       tostring(requestedX),
       tostring(requestedY),
-      tostring(labelX),
-      tostring(labelY),
+      tostring(textX),
+      tostring(textY),
       tostring(spec.slotX),
       tostring(spec.slotY),
       tostring(spec.slotW),
@@ -293,30 +292,49 @@ local function drawLeaderLabel(args, spec)
       "overview annotation clamped:"
         .. " name=" .. annotationName
         .. " requested=" .. tostring(requestedX) .. "," .. tostring(requestedY)
-        .. " final=" .. tostring(labelX) .. "," .. tostring(labelY)
+        .. " final=" .. tostring(textX) .. "," .. tostring(textY)
         .. " viewport=" .. tostring(spec.slotX) .. "," .. tostring(spec.slotY)
         .. ":" .. tostring(spec.slotW) .. "x" .. tostring(spec.slotH)
     )
   end
 
+  local viewportMinX = spec.slotX + 1
+  local viewportMinY = spec.slotY + 1
+  local viewportMaxX = spec.slotX + spec.slotW - 2
+  local viewportMaxY = spec.slotY + spec.slotH - 2
+  local anchorX = clampValue(math.floor(spec.anchorX), viewportMinX, viewportMaxX)
+  local anchorY = clampValue(math.floor(spec.anchorY), viewportMinY, viewportMaxY)
+  local elbowX = clampValue(math.floor(spec.elbowX), viewportMinX, viewportMaxX)
+  local elbowY = clampValue(math.floor(spec.elbowY), viewportMinY, viewportMaxY)
+  local textGap = math.max(2, math.floor(spec.textGap or 3))
+  local side = spec.side == "left" and "left" or "right"
+  local endX = side == "left" and (textX + textW + textGap) or (textX - textGap)
+  endX = clampValue(endX, viewportMinX, viewportMaxX)
+  local endY = elbowY
+
   local lineColor = spec.lineColor
   local lineThickness = math.max(1, math.floor(spec.lineThickness or 1))
-  drawLineSafe(args, spec.anchorX, spec.anchorY, spec.kneeX, spec.kneeY, lineColor, lineThickness)
-  drawLineSafe(args, spec.kneeX, spec.kneeY, labelTargetX, labelTargetY, lineColor, lineThickness)
+  drawLineSafe(args, anchorX, anchorY, elbowX, elbowY, lineColor, lineThickness)
+  drawLineSafe(args, elbowX, elbowY, endX, endY, lineColor, lineThickness)
 
-  GpuSafe.filledRect(args, labelX, labelY, boxW, boxH, spec.bgColor)
-  GpuSafe.rectangle(args, labelX, labelY, boxW, boxH, spec.borderColor)
+  local cap = math.max(1, math.floor(spec.capSize or 2))
+  drawLineSafe(args, endX, endY - cap, endX, endY + cap, lineColor, 1)
 
-  if type(spec.drawTextCenter) == "function" then
-    spec.drawTextCenter(
-      labelX,
-      labelY + math.max(0, math.floor((boxH - textH) / 2)),
-      boxW,
-      text,
-      spec.textColor,
-      size
-    )
+  if spec.textShadowColor then
+    GpuSafe.drawText(args, textX + 1, textY + 1, text, spec.textShadowColor, nil, size, 0, {
+      clipX = spec.slotX + 1,
+      clipY = spec.slotY + 1,
+      clipW = spec.slotW - 2,
+      clipH = spec.slotH - 2,
+    })
   end
+
+  GpuSafe.drawText(args, textX, textY, text, spec.textColor, nil, size, 0, {
+    clipX = spec.slotX + 1,
+    clipY = spec.slotY + 1,
+    clipW = spec.slotW - 2,
+    clipH = spec.slotH - 2,
+  })
 end
 
 local function resolveAnnotationProfile(ui, slotW, slotH)
@@ -329,17 +347,32 @@ local function resolveAnnotationProfile(ui, slotW, slotH)
       enabled = true,
       mode = "micro",
       lineThickness = 1,
-      rightOffset = 3,
-      diagStep = 5,
-      labelPadX = 1,
-      caseDiagY = -4,
-      caseLabelDy = -3,
-      coreDiagY = 5,
-      coreLabelDy = -3,
-      portKneeY = 4,
-      portKneeX = { -3, 0, 3 },
-      portLabelDx = { -13, -8, -2 },
-      portLabelDy = { 4, 5, 6 },
+      textGap = 2,
+      capSize = 1,
+      textShadowColor = 0x88000000,
+      case = {
+        anchorRatioX = 0.79,
+        anchorRatioY = 0.34,
+        elbowDx = 7,
+        elbowDy = -6,
+        textDx = 4,
+        textDy = -7,
+      },
+      core = {
+        anchorRatioX = 0.52,
+        anchorRatioY = 0.52,
+        elbowDx = 7,
+        elbowDy = 7,
+        textDx = 4,
+        textDy = -2,
+      },
+      ports = {
+        anchorRatioY = 0.91,
+        elbowDx = { -5, 0, 5 },
+        elbowDy = { 7, 8, 7 },
+        textDx = { -16, -7, 2 },
+        textDy = { 6, 7, 6 },
+      },
       portNames = {
         tritium = "T",
         dtFuel = "DT",
@@ -355,17 +388,32 @@ local function resolveAnnotationProfile(ui, slotW, slotH)
       enabled = true,
       mode = "compact",
       lineThickness = 1,
-      rightOffset = 5,
-      diagStep = 7,
-      labelPadX = 2,
-      caseDiagY = -6,
-      caseLabelDy = -5,
-      coreDiagY = 8,
-      coreLabelDy = -5,
-      portKneeY = 7,
-      portKneeX = { -7, 0, 7 },
-      portLabelDx = { -40, -24, -8 },
-      portLabelDy = { 6, 8, 10 },
+      textGap = 3,
+      capSize = 2,
+      textShadowColor = 0x88000000,
+      case = {
+        anchorRatioX = 0.79,
+        anchorRatioY = 0.34,
+        elbowDx = 11,
+        elbowDy = -10,
+        textDx = 5,
+        textDy = -8,
+      },
+      core = {
+        anchorRatioX = 0.52,
+        anchorRatioY = 0.52,
+        elbowDx = 10,
+        elbowDy = 11,
+        textDx = 5,
+        textDy = 0,
+      },
+      ports = {
+        anchorRatioY = 0.91,
+        elbowDx = { -8, 0, 8 },
+        elbowDy = { 11, 12, 11 },
+        textDx = { -33, -11, 5 },
+        textDy = { 8, 10, 8 },
+      },
       portNames = {
         tritium = "TRI",
         dtFuel = "DT",
@@ -379,18 +427,33 @@ local function resolveAnnotationProfile(ui, slotW, slotH)
   return {
     enabled = true,
     mode = "large",
-    lineThickness = 2,
-    rightOffset = 7,
-    diagStep = 9,
-    labelPadX = 2,
-    caseDiagY = -8,
-    caseLabelDy = -6,
-    coreDiagY = 9,
-    coreLabelDy = -6,
-    portKneeY = 9,
-    portKneeX = { -9, 0, 9 },
-    portLabelDx = { -52, -30, -9 },
-    portLabelDy = { 8, 11, 14 },
+    lineThickness = 1,
+    textGap = 3,
+    capSize = 2,
+    textShadowColor = 0x88000000,
+    case = {
+      anchorRatioX = 0.79,
+      anchorRatioY = 0.34,
+      elbowDx = 16,
+      elbowDy = -14,
+      textDx = 7,
+      textDy = -10,
+    },
+    core = {
+      anchorRatioX = 0.52,
+      anchorRatioY = 0.52,
+      elbowDx = 14,
+      elbowDy = 15,
+      textDx = 7,
+      textDy = 2,
+    },
+    ports = {
+      anchorRatioY = 0.91,
+      elbowDx = { -12, 0, 12 },
+      elbowDy = { 14, 16, 14 },
+      textDx = { -42, -14, 6 },
+      textDy = { 10, 13, 10 },
+    },
     portNames = {
       tritium = "TRITIUM",
       dtFuel = "DT-FUEL",
@@ -408,114 +471,102 @@ local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX
     return
   end
 
-  local smallPad = ui and ui.smallPad or 1
   local tempColor = 0xFFE54E60
-  local bgColor = 0xC0151B24
-  local borderColor = 0xCC2B3646
   local caseLabelText = formatTemperatureLabel(profile, "case", data and data.caseMK)
   local coreLabelText = formatTemperatureLabel(profile, "core", data and data.plasmaMK)
 
-  local caseAnchorX = reactorX + math.floor(reactorW * 0.78)
-  local caseAnchorY = reactorY + math.floor(reactorH * 0.34)
-  local caseKneeX = clampValue(caseAnchorX + profile.diagStep, slotX + 1, slotX + slotW - 2)
-  local caseKneeY = clampValue(caseAnchorY + profile.caseDiagY, slotY + 1, slotY + slotH - 2)
-  local caseLabelX = caseKneeX + profile.rightOffset + smallPad
-  local caseLabelY = caseKneeY + profile.caseLabelDy
+  local caseAnchorX = reactorX + math.floor(reactorW * profile.case.anchorRatioX)
+  local caseAnchorY = reactorY + math.floor(reactorH * profile.case.anchorRatioY)
+  local caseElbowX = clampValue(caseAnchorX + profile.case.elbowDx, slotX + 1, slotX + slotW - 2)
+  local caseElbowY = clampValue(caseAnchorY + profile.case.elbowDy, slotY + 1, slotY + slotH - 2)
 
-  drawLeaderLabel(args, {
+  drawCalloutLabel(args, {
     name = "CASE",
     text = caseLabelText,
     size = 1,
-    padX = profile.labelPadX,
-    padY = 0,
     slotX = slotX,
     slotY = slotY,
     slotW = slotW,
     slotH = slotH,
-    labelX = caseLabelX,
-    labelY = caseLabelY,
+    textX = caseElbowX + profile.case.textDx,
+    textY = caseElbowY + profile.case.textDy,
     side = "right",
     anchorX = caseAnchorX,
     anchorY = caseAnchorY,
-    kneeX = caseKneeX,
-    kneeY = caseKneeY,
+    elbowX = caseElbowX,
+    elbowY = caseElbowY,
     lineColor = tempColor,
     lineThickness = profile.lineThickness,
     textColor = tempColor,
-    bgColor = bgColor,
-    borderColor = borderColor,
-    drawTextCenter = drawTextCenter,
+    textShadowColor = profile.textShadowColor,
+    textGap = profile.textGap,
+    capSize = profile.capSize,
     textPixelHeight = textPixelHeight,
   })
 
-  local coreAnchorX = reactorX + math.floor(reactorW * 0.52)
-  local coreAnchorY = reactorY + math.floor(reactorH * 0.52)
-  local coreKneeX = clampValue(coreAnchorX + profile.diagStep, slotX + 1, slotX + slotW - 2)
-  local coreKneeY = clampValue(coreAnchorY + profile.coreDiagY, slotY + 1, slotY + slotH - 2)
-  local coreLabelX = coreKneeX + profile.rightOffset + smallPad
-  local coreLabelY = coreKneeY + profile.coreLabelDy
+  local coreAnchorX = reactorX + math.floor(reactorW * profile.core.anchorRatioX)
+  local coreAnchorY = reactorY + math.floor(reactorH * profile.core.anchorRatioY)
+  local coreElbowX = clampValue(coreAnchorX + profile.core.elbowDx, slotX + 1, slotX + slotW - 2)
+  local coreElbowY = clampValue(coreAnchorY + profile.core.elbowDy, slotY + 1, slotY + slotH - 2)
 
-  drawLeaderLabel(args, {
+  drawCalloutLabel(args, {
     name = "CORE",
     text = coreLabelText,
     size = 1,
-    padX = profile.labelPadX,
-    padY = 0,
     slotX = slotX,
     slotY = slotY,
     slotW = slotW,
     slotH = slotH,
-    labelX = coreLabelX,
-    labelY = coreLabelY,
+    textX = coreElbowX + profile.core.textDx,
+    textY = coreElbowY + profile.core.textDy,
     side = "right",
     anchorX = coreAnchorX,
     anchorY = coreAnchorY,
-    kneeX = coreKneeX,
-    kneeY = coreKneeY,
+    elbowX = coreElbowX,
+    elbowY = coreElbowY,
     lineColor = tempColor,
     lineThickness = profile.lineThickness,
     textColor = tempColor,
-    bgColor = bgColor,
-    borderColor = borderColor,
-    drawTextCenter = drawTextCenter,
+    textShadowColor = profile.textShadowColor,
+    textGap = profile.textGap,
+    capSize = profile.capSize,
     textPixelHeight = textPixelHeight,
   })
 
+  local portProfile = profile.ports
   local portTelemetrySummary = {}
   for idx, channel in ipairs(PORT_CHANNELS) do
     local portAnchorX = reactorX + math.floor(reactorW * channel.ratio)
-    local portAnchorY = reactorY + math.floor(reactorH * 0.91)
-    local portKneeX = clampValue(portAnchorX + (profile.portKneeX[idx] or 0), slotX + 1, slotX + slotW - 2)
-    local portKneeY = clampValue(portAnchorY + profile.portKneeY, slotY + 1, slotY + slotH - 2)
-    local portLabelX = portKneeX + (profile.portLabelDx[idx] or 0)
-    local portLabelY = portKneeY + (profile.portLabelDy[idx] or 0)
+    local portAnchorY = reactorY + math.floor(reactorH * portProfile.anchorRatioY)
+    local portElbowX = clampValue(portAnchorX + (portProfile.elbowDx[idx] or 0), slotX + 1, slotX + slotW - 2)
+    local portElbowY = clampValue(portAnchorY + (portProfile.elbowDy[idx] or 0), slotY + 1, slotY + slotH - 2)
+    local portTextX = portElbowX + (portProfile.textDx[idx] or 0)
+    local portTextY = portElbowY + (portProfile.textDy[idx] or 0)
     local isOpen, source = resolvePortOpenState(data, channel.key)
     local labelText = formatPortStatus(profile, channel.key, isOpen)
-    local side = (portLabelX < portAnchorX) and "left" or "right"
+    local side = (portTextX <= portElbowX) and "left" or "right"
 
-    drawLeaderLabel(args, {
+    drawCalloutLabel(args, {
       name = "FLOW_" .. string.upper(channel.key),
       text = labelText,
       size = 1,
-      padX = profile.labelPadX,
-      padY = 0,
       slotX = slotX,
       slotY = slotY,
       slotW = slotW,
       slotH = slotH,
-      labelX = portLabelX,
-      labelY = portLabelY,
+      textX = portTextX,
+      textY = portTextY,
       side = side,
       anchorX = portAnchorX,
       anchorY = portAnchorY,
-      kneeX = portKneeX,
-      kneeY = portKneeY,
+      elbowX = portElbowX,
+      elbowY = portElbowY,
       lineColor = channel.color,
       lineThickness = profile.lineThickness,
       textColor = channel.color,
-      bgColor = bgColor,
-      borderColor = borderColor,
-      drawTextCenter = drawTextCenter,
+      textShadowColor = profile.textShadowColor,
+      textGap = profile.textGap,
+      capSize = profile.capSize,
       textPixelHeight = textPixelHeight,
     })
 
