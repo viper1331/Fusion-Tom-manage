@@ -164,6 +164,7 @@ local UpdateManifest = assert(dofile("core/update/manifest.lua"))
 local UpdateClient = assert(dofile("core/update/client.lua"))
 local UpdateApply = assert(dofile("core/update/apply.lua"))
 local ResponsiveLayout = assert(dofile("ui/helpers/layout.lua"))
+local GpuSafe = assert(dofile("ui/helpers/gpu_safe.lua"))
 local NavigationView = assert(dofile("ui/components/navigation.lua"))
 local UpdatePageView = assert(dofile("ui/pages/update_page.lua"))
 local ControlPageView = assert(dofile("ui/pages/control_page.lua"))
@@ -1452,43 +1453,48 @@ local function chooseStateColor(data)
 end
 
 local function drawText(x, y, text, color, size)
-  local s = tostring(text or "")
-  size = size or 1
-
-  local sw, sh = gpu.getSize()
-  local tw = gpu.getTextLength(s, size, 0)
-  local th = textPixelHeight(size)
-
-  if tw <= 0 then return false end
-  if y < 0 or (y + th) > sh then return false end
-
-  if x < 0 then x = 0 end
-  if (x + tw) > sw then
-    x = sw - tw
-  end
-
-  if x < 0 then return false end
-
-  gpu.drawText(x, y, s, color or C.text, C.blackA0, size, 0)
-  return true
+  return GpuSafe.drawText(
+    { gpu = gpu, ui = ui },
+    x,
+    y,
+    text,
+    color or C.text,
+    C.blackA0,
+    size or 1,
+    0
+  )
 end
 
 local function drawTextRight(xRight, y, text, color, size)
-  local s = tostring(text or "")
-  size = size or 1
-  local tw = gpu.getTextLength(s, size, 0)
-  return drawText(xRight - tw, y, s, color, size)
+  return GpuSafe.drawTextRight(
+    { gpu = gpu, ui = ui },
+    xRight,
+    y,
+    text,
+    color or C.text,
+    C.blackA0,
+    size or 1,
+    0
+  )
 end
 
 local function drawTextCenter(x, y, w, text, color, size)
-  if w <= 0 then return false end
+  if w <= 0 then
+    return false
+  end
 
-  local s = tostring(text or "")
-  size = size or 1
-  local tw = gpu.getTextLength(s, size, 0)
-  local tx = x + math.floor((w - tw) / 2)
-
-  return drawText(tx, y, s, color, size)
+  return GpuSafe.drawTextCenter(
+    { gpu = gpu, ui = ui },
+    x,
+    y,
+    w,
+    text,
+    color or C.text,
+    C.blackA0,
+    size or 1,
+    0,
+    { clipX = x, clipW = w }
+  )
 end
 
 local function drawPanel(x, y, w, h, title)

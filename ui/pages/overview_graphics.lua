@@ -145,10 +145,39 @@ local function drawLeaderLabel(args, spec)
     return
   end
 
-  local labelX = clampValue(math.floor(spec.labelX), minX, maxX)
-  local labelY = clampValue(math.floor(spec.labelY), minY, maxY)
+  local requestedX = math.floor(spec.labelX)
+  local requestedY = math.floor(spec.labelY)
+  local labelX = clampValue(requestedX, minX, maxX)
+  local labelY = clampValue(requestedY, minY, maxY)
   local labelTargetX = (spec.side == "left") and (labelX + boxW - 1) or labelX
   local labelTargetY = labelY + math.floor(boxH / 2)
+  local annotationName = tostring(spec.name or "annotation")
+
+  if labelX ~= requestedX or labelY ~= requestedY then
+    local clampKey = table.concat({
+      annotationName,
+      tostring(requestedX),
+      tostring(requestedY),
+      tostring(labelX),
+      tostring(labelY),
+      tostring(spec.slotX),
+      tostring(spec.slotY),
+      tostring(spec.slotW),
+      tostring(spec.slotH),
+    }, "|")
+
+    appendRuntimeLogOnce(
+      args,
+      "annotation_clamp_" .. annotationName,
+      clampKey,
+      "overview annotation clamped:"
+        .. " name=" .. annotationName
+        .. " requested=" .. tostring(requestedX) .. "," .. tostring(requestedY)
+        .. " final=" .. tostring(labelX) .. "," .. tostring(labelY)
+        .. " viewport=" .. tostring(spec.slotX) .. "," .. tostring(spec.slotY)
+        .. ":" .. tostring(spec.slotW) .. "x" .. tostring(spec.slotH)
+    )
+  end
 
   local lineColor = spec.lineColor
   local lineThickness = math.max(1, math.floor(spec.lineThickness or 1))
@@ -240,6 +269,7 @@ local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX
   local caseLabelY = caseKneeY - (ui and ui.micro and 4 or 6)
 
   drawLeaderLabel(args, {
+    name = "CASE",
     text = profile.caseLabel,
     size = 1,
     padX = profile.labelPadX,
@@ -272,6 +302,7 @@ local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX
   local coreLabelY = coreKneeY - (ui and ui.micro and 4 or 6)
 
   drawLeaderLabel(args, {
+    name = "CORE",
     text = profile.coreLabel,
     size = 1,
     padX = profile.labelPadX,
@@ -304,6 +335,7 @@ local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX
   local portsLabelY = portsKneeY + 1
 
   drawLeaderLabel(args, {
+    name = "PORTS",
     text = profile.portsLabel,
     size = 1,
     padX = profile.labelPadX,
