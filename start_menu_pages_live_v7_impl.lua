@@ -3198,7 +3198,7 @@ local function drawUpdatePage(r)
   })
 end
 
-local function drawImageStack(slotX, slotY, slotW, slotH, data, forcedLayout)
+local function drawImageStack(slotX, slotY, slotW, slotH, data, forcedLayout, responsiveOptions)
   local rendererSceneMode = state.visual.sceneMode
   if rendererSceneMode ~= "pair" and rendererSceneMode ~= "reactor-only" and rendererSceneMode ~= "none" then
     if images.reactor and images.laserModule then
@@ -3233,12 +3233,13 @@ local function drawImageStack(slotX, slotY, slotW, slotH, data, forcedLayout)
     laserAssetName = state.visual.moduleAsset,
     fallbackReactorVariant = getFallbackReactorVariant(),
     fallbackLaserVariant = getFallbackLaserModuleVariant(),
+    responsiveOptions = responsiveOptions,
   })
 end
 
-local function drawOverviewReactorLaserScene(slotX, slotY, slotW, slotH, data, layout)
+local function drawOverviewReactorLaserScene(slotX, slotY, slotW, slotH, data, layout, responsiveOptions)
   -- Stable wrapper kept in entrypoint to avoid breaking external expectations.
-  drawImageStack(slotX, slotY, slotW, slotH, data, layout)
+  drawImageStack(slotX, slotY, slotW, slotH, data, layout, responsiveOptions)
 end
 
 local function drawOverviewPage(r, data)

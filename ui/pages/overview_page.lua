@@ -92,12 +92,28 @@ local function drawOverviewImageZone(args, zones)
 
   logOverviewViewport(args, zones, imgW, imgH)
 
-  args.drawReactorLaserScene(imgX, imgY, imgW, imgH, data, zones.overviewLayout)
-
+  local responsiveMode = ui.micro and "micro" or (ui.compact and "compact" or "large")
   local badgeW = ui.compact and math.max(70, sv(88)) or math.max(82, sv(102))
   local badgeH = math.max(14, sv(16))
   local badgeX = innerX + innerW - badgeW - ui.smallPad
   local badgeY = innerY + ui.smallPad
+
+  local countBadgeW = ui.micro and math.max(40, sv(50)) or (ui.compact and math.max(54, sv(66)) or math.max(64, sv(78)))
+  local countBadgeH = ui.micro and math.max(10, sv(11)) or math.max(11, sv(12))
+  local countBadgeX = innerX + innerW - countBadgeW - ui.smallPad
+  local countBadgeY = badgeY + badgeH + math.max(1, math.floor(ui.smallPad * 0.35))
+
+  local reservedRects = {
+    { name = "status", x = badgeX, y = badgeY, w = badgeW, h = badgeH },
+    { name = "laser", x = countBadgeX, y = countBadgeY, w = countBadgeW, h = countBadgeH },
+  }
+  local responsiveOptions = {
+    reservedRects = reservedRects,
+    responsiveMode = responsiveMode,
+    sceneViewport = { x = imgX, y = imgY, w = imgW, h = imgH },
+  }
+  args.drawReactorLaserScene(imgX, imgY, imgW, imgH, data, zones.overviewLayout, responsiveOptions)
+
   local statusColor = args.chooseStateColor(data)
 
   gpu.filledRectangle(badgeX, badgeY, badgeW, badgeH, C.panel)
@@ -105,10 +121,6 @@ local function drawOverviewImageZone(args, zones)
   args.drawTextCenter(badgeX, badgeY + math.max(0, math.floor((badgeH - args.textPixelHeight(1)) / 2)), badgeW, data.status, statusColor, 1)
 
   local laserCountText = ui.micro and ("Lx" .. tostring(args.control.laserModuleCount)) or ("LASER x" .. tostring(args.control.laserModuleCount))
-  local countBadgeW = ui.micro and math.max(40, sv(50)) or (ui.compact and math.max(54, sv(66)) or math.max(64, sv(78)))
-  local countBadgeH = ui.micro and math.max(10, sv(11)) or math.max(11, sv(12))
-  local countBadgeX = innerX + innerW - countBadgeW - ui.smallPad
-  local countBadgeY = badgeY + badgeH + math.max(1, math.floor(ui.smallPad * 0.35))
   gpu.filledRectangle(countBadgeX, countBadgeY, countBadgeW, countBadgeH, C.panel2)
   gpu.rectangle(countBadgeX, countBadgeY, countBadgeW, countBadgeH, C.border)
   args.drawTextCenter(

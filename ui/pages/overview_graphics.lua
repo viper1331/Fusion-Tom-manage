@@ -4,6 +4,8 @@ local ElectricFlowAnimation = assert(dofile("ui/animations/electric_flow.lua"))
 local ReactorCoreAnimation = assert(dofile("ui/animations/reactor_core.lua"))
 local GpuSafe = assert(dofile("ui/helpers/gpu_safe.lua"))
 local renderLogKeys = {}
+local calloutPlacementCache = {}
+local lastViewportKey = nil
 local STACK_CALIBRATION = {
   large = {
     moduleGapMul = 0.46,
@@ -80,6 +82,30 @@ local function resolveStackCalibration(ui, state)
     maxWFill = maxWFill,
     maxHFill = maxHFill,
   }
+end
+
+local function resolveResponsiveMode(ui, responsiveOptions)
+  local mode = responsiveOptions and responsiveOptions.responsiveMode
+  if mode == "large" or mode == "compact" or mode == "micro" then
+    return mode
+  end
+  if ui and ui.micro then
+    return "micro"
+  end
+  if ui and ui.compact then
+    return "compact"
+  end
+  return "large"
+end
+
+local function resolveResponsiveFactor(mode)
+  if mode == "micro" then
+    return 0.62, "minimal"
+  end
+  if mode == "compact" then
+    return 0.82, "lite"
+  end
+  return 1.00, "normal"
 end
 
 local function appendRuntimeLog(args, message)
@@ -320,6 +346,41 @@ local function fitTextToWidth(gpu, text, size, maxWidth)
   return ""
 end
 
+local function normalizeReservedRects(reservedRects)
+  local normalized = {}
+  if type(reservedRects) ~= "table" then
+    return normalized
+  end
+
+  for _, rect in ipairs(reservedRects) do
+    if type(rect) == "table" then
+      local rx = math.floor(tonumber(rect.x) or 0)
+      local ry = math.floor(tonumber(rect.y) or 0)
+      local rw = math.floor(tonumber(rect.w) or 0)
+      local rh = math.floor(tonumber(rect.h) or 0)
+      if rw > 0 and rh > 0 then
+        normalized[#normalized + 1] = {
+          name = rect.name,
+          x = rx,
+          y = ry,
+          w = rw,
+          h = rh,
+        }
+      end
+    end
+  end
+
+  return normalized
+end
+
+local function rectsIntersect(a, b)
+  local aRight = a.x + a.w - 1
+  local aBottom = a.y + a.h - 1
+  local bRight = b.x + b.w - 1
+  local bBottom = b.y + b.h - 1
+  return a.x <= bRight and aRight >= b.x and a.y <= bBottom and aBottom >= b.y
+end
+
 local function drawCalloutLabel(args, spec)
   local gpu = args and args.gpu
   if not gpu then
@@ -342,6 +403,7 @@ local function drawCalloutLabel(args, spec)
 
   local textH = math.max(1, spec.textPixelHeight and spec.textPixelHeight(size) or (8 * size))
   local annotationName = tostring(spec.name or "annotation")
+  local reservedRects = normalizeReservedRects(spec.reservedRects)
 
   local anchorX = clampValue(math.floor(spec.anchorX), viewportMinX, viewportMaxX)
   local anchorY = clampValue(math.floor(spec.anchorY), viewportMinY, viewportMaxY)
@@ -353,6 +415,7 @@ local function drawCalloutLabel(args, spec)
   local requestedEndLen = math.max(minHorizontal, math.floor(math.abs(spec.endLen or 20)))
   local requestedTextY = elbowY + (spec.textDy or 0)
   local textY = clampValue(math.floor(requestedTextY), viewportMinY, viewportMaxY - textH + 1)
+  local endY = clampValue(elbowY, viewportMinY, viewportMaxY)
 
   local function computeAvailableWidth(candidateSide)
     if candidateSide == "right" then
@@ -409,16 +472,102 @@ local function drawCalloutLabel(args, spec)
     }
   end
 
-  local placement = placementForSide(side)
+  local function firstReservedCollision(candidatePlacement, candidateTextY)
+    if #reservedRects == 0 then
+      return nil
+    end
+    local textRect = {
+      x = candidatePlacement.textX,
+      y = candidateTextY,
+      w = candidatePlacement.textW,
+      h = textH,
+    }
+    for _, rect in ipairs(reservedRects) do
+      if rectsIntersect(textRect, rect) then
+        return rect
+      end
+    end
+    return nil
+  end
+
+  local function resolveTextYForPlacement(candidatePlacement)
+    local baseY = textY
+    if #reservedRects == 0 then
+      return baseY, false, false
+    end
+
+    local collision = firstReservedCollision(candidatePlacement, baseY)
+    if not collision then
+      return baseY, false, false
+    end
+
+    local minY = viewportMinY
+    local maxY = viewportMaxY - textH + 1
+    local seen = {}
+    local candidates = {}
+
+    local function pushCandidate(value)
+      local clamped = clampValue(math.floor(value), minY, maxY)
+      if not seen[clamped] then
+        seen[clamped] = true
+        candidates[#candidates + 1] = clamped
+      end
+    end
+
+    for _, rect in ipairs(reservedRects) do
+      pushCandidate(rect.y - textH - 1)
+      pushCandidate(rect.y + rect.h + 1)
+    end
+    pushCandidate(endY - textH - 2)
+    pushCandidate(endY + 2)
+    pushCandidate(baseY - textH - 1)
+    pushCandidate(baseY + textH + 1)
+    pushCandidate(minY)
+    pushCandidate(maxY)
+
+    for _, candidateY in ipairs(candidates) do
+      if not firstReservedCollision(candidatePlacement, candidateY) then
+        return candidateY, true, false
+      end
+    end
+
+    return baseY, true, true
+  end
+
+  local function resolvePlacementForSide(candidateSide)
+    local candidate = placementForSide(candidateSide)
+    if not candidate then
+      return nil
+    end
+    local resolvedY, hadCollision, unresolved = resolveTextYForPlacement(candidate)
+    candidate.textY = resolvedY
+    candidate.hadReservedCollision = hadCollision
+    candidate.unresolvedReservedCollision = unresolved
+    return candidate
+  end
+
+  local placement = resolvePlacementForSide(side)
   if not placement then
     local alternate = side == "right" and "left" or "right"
-    placement = placementForSide(alternate)
+    placement = resolvePlacementForSide(alternate)
     if placement then
       appendRuntimeLogOnce(
         args,
         "annotation_side_flip_" .. annotationName,
         annotationName .. "|" .. tostring(alternate) .. "|" .. tostring(viewportMinX) .. "|" .. tostring(viewportMaxX),
         "overview annotation side fallback: name=" .. annotationName .. " side=" .. side .. "->" .. alternate
+      )
+    end
+  elseif placement.unresolvedReservedCollision then
+    local alternate = placement.side == "right" and "left" or "right"
+    local alternatePlacement = resolvePlacementForSide(alternate)
+    if alternatePlacement and not alternatePlacement.unresolvedReservedCollision then
+      placement = alternatePlacement
+      appendRuntimeLogOnce(
+        args,
+        "annotation_reserved_flip_" .. annotationName,
+        annotationName .. "|" .. tostring(alternate) .. "|" .. tostring(viewportMinX) .. "|" .. tostring(viewportMaxX),
+        "overview annotation side fallback: name=" .. annotationName .. " reason=reserved_collision side=" .. side .. "->" .. alternate
       )
     end
   end
@@ -453,6 +602,9 @@ local function drawCalloutLabel(args, spec)
       endX = emergencyEndX,
       requestedTextX = emergencyX,
       availableWidth = bestWidth,
+      textY = textY,
+      hadReservedCollision = false,
+      unresolvedReservedCollision = false,
     }
 
     appendRuntimeLogOnce(
@@ -460,6 +612,26 @@ local function drawCalloutLabel(args, spec)
       "annotation_emergency_" .. annotationName,
       annotationName .. "|" .. tostring(bestSide) .. "|" .. tostring(bestWidth),
       "overview annotation emergency placement: name=" .. annotationName .. " side=" .. bestSide
+    )
+  end
+
+  if placement.hadReservedCollision then
+    local reservedKey = table.concat({
+      annotationName,
+      tostring(placement.side),
+      tostring(placement.textX),
+      tostring(placement.textY),
+      tostring(placement.unresolvedReservedCollision and "blocked" or "shifted"),
+    }, "|")
+    appendRuntimeLogOnce(
+      args,
+      "annotation_reserved_" .. annotationName,
+      reservedKey,
+      "overview annotation reserved recalibration:"
+        .. " name=" .. annotationName
+        .. " side=" .. tostring(placement.side)
+        .. " final=" .. tostring(placement.textX) .. "," .. tostring(placement.textY)
+        .. " status=" .. (placement.unresolvedReservedCollision and "blocked" or "shifted")
     )
   end
 
@@ -475,13 +647,14 @@ local function drawCalloutLabel(args, spec)
     )
   end
 
-  if placement.textX ~= placement.requestedTextX or textY ~= requestedTextY then
+  local finalTextY = placement.textY or textY
+  if placement.textX ~= placement.requestedTextX or finalTextY ~= requestedTextY then
     local clampKey = table.concat({
       annotationName,
       tostring(placement.requestedTextX),
       tostring(requestedTextY),
       tostring(placement.textX),
-      tostring(textY),
+      tostring(finalTextY),
       tostring(spec.slotX),
       tostring(spec.slotY),
       tostring(spec.slotW),
@@ -495,13 +668,11 @@ local function drawCalloutLabel(args, spec)
       "overview annotation clamped:"
         .. " name=" .. annotationName
         .. " requested=" .. tostring(placement.requestedTextX) .. "," .. tostring(requestedTextY)
-        .. " final=" .. tostring(placement.textX) .. "," .. tostring(textY)
+        .. " final=" .. tostring(placement.textX) .. "," .. tostring(finalTextY)
         .. " viewport=" .. tostring(spec.slotX) .. "," .. tostring(spec.slotY)
         .. ":" .. tostring(spec.slotW) .. "x" .. tostring(spec.slotH)
     )
   end
-
-  local endY = clampValue(elbowY, viewportMinY, viewportMaxY)
 
   local lineColor = spec.lineColor
   local lineThickness = math.max(1, math.floor(spec.lineThickness or 1))
@@ -515,7 +686,7 @@ local function drawCalloutLabel(args, spec)
   GpuSafe.filledRect(args, anchorX - anchorHalf, anchorY - anchorHalf, anchorDot, anchorDot, lineColor)
 
   if spec.textShadowColor then
-    GpuSafe.drawText(args, placement.textX + 1, textY + 1, placement.text, spec.textShadowColor, nil, size, 0, {
+    GpuSafe.drawText(args, placement.textX + 1, finalTextY + 1, placement.text, spec.textShadowColor, nil, size, 0, {
       clipX = spec.slotX + 1,
       clipY = spec.slotY + 1,
       clipW = spec.slotW - 2,
@@ -523,12 +694,35 @@ local function drawCalloutLabel(args, spec)
     })
   end
 
-  GpuSafe.drawText(args, placement.textX, textY, placement.text, spec.textColor, nil, size, 0, {
+  GpuSafe.drawText(args, placement.textX, finalTextY, placement.text, spec.textColor, nil, size, 0, {
     clipX = spec.slotX + 1,
     clipY = spec.slotY + 1,
     clipW = spec.slotW - 2,
     clipH = spec.slotH - 2,
   })
+
+  calloutPlacementCache[annotationName] = {
+    side = placement.side,
+    text = placement.text,
+    x = placement.textX,
+    y = finalTextY,
+  }
+  local placementLogKey = table.concat({
+    annotationName,
+    tostring(placement.side),
+    tostring(placement.text),
+    tostring(placement.textX),
+    tostring(finalTextY),
+  }, "|")
+  appendRuntimeLogOnce(
+    args,
+    "overview_callout_placement_" .. annotationName,
+    placementLogKey,
+    "overview callout placement: name=" .. annotationName
+      .. " side=" .. tostring(placement.side)
+      .. " text=\"" .. tostring(placement.text) .. "\""
+      .. " final=" .. tostring(placement.textX) .. "," .. tostring(finalTextY)
+  )
 end
 
 local function resolveAnnotationProfile(ui, slotW, slotH)
@@ -673,12 +867,38 @@ local function resolveAnnotationProfile(ui, slotW, slotH)
   }
 end
 
-local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX, slotY, slotW, slotH, reactorX, reactorY, reactorW, reactorH, data)
+local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX, slotY, slotW, slotH, reactorX, reactorY, reactorW, reactorH, data, responsiveOptions)
   local ui = args.ui
   local _ = drawTextCenter
   local profile = resolveAnnotationProfile(ui, slotW, slotH)
   if not profile.enabled then
     return
+  end
+
+  local reservedRects = responsiveOptions and responsiveOptions.reservedRects or nil
+  local sceneViewport = responsiveOptions and responsiveOptions.sceneViewport or nil
+  local sceneViewportW = sceneViewport and tonumber(sceneViewport.w) or slotW
+  local responsiveFactor = 1.00
+  if profile.mode == "compact" and sceneViewportW < 170 then
+    responsiveFactor = 0.90
+  elseif profile.mode == "micro" and sceneViewportW < 130 then
+    responsiveFactor = 0.78
+  end
+
+  local function scaleSigned(value, minAbs)
+    local raw = tonumber(value) or 0
+    local sign = raw < 0 and -1 or 1
+    local scaled = math.floor(math.abs(raw) * responsiveFactor + 0.5)
+    if math.abs(raw) > 0 then
+      scaled = math.max(minAbs or 1, scaled)
+    end
+    return sign * scaled
+  end
+
+  local function scaleLength(value, minAbs)
+    local raw = math.abs(tonumber(value) or 0)
+    local scaled = math.floor(raw * responsiveFactor + 0.5)
+    return math.max(minAbs or 4, scaled)
   end
 
   local tempColor = 0xFFE54E60
@@ -687,8 +907,8 @@ local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX
 
   local caseAnchorX = reactorX + math.floor(reactorW * profile.case.anchorRatioX)
   local caseAnchorY = reactorY + math.floor(reactorH * profile.case.anchorRatioY)
-  local caseElbowX = clampValue(caseAnchorX + profile.case.elbowDx, slotX + 1, slotX + slotW - 2)
-  local caseElbowY = clampValue(caseAnchorY + profile.case.elbowDy, slotY + 1, slotY + slotH - 2)
+  local caseElbowX = clampValue(caseAnchorX + scaleSigned(profile.case.elbowDx, 2), slotX + 1, slotX + slotW - 2)
+  local caseElbowY = clampValue(caseAnchorY + scaleSigned(profile.case.elbowDy, 2), slotY + 1, slotY + slotH - 2)
 
   drawCalloutLabel(args, {
     name = "CASE",
@@ -703,8 +923,8 @@ local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX
     anchorY = caseAnchorY,
     elbowX = caseElbowX,
     elbowY = caseElbowY,
-    endLen = profile.case.endLen,
-    textDy = profile.case.textDy,
+    endLen = scaleLength(profile.case.endLen, profile.minHorizontal),
+    textDy = scaleSigned(profile.case.textDy, 1),
     lineColor = tempColor,
     lineThickness = profile.lineThickness,
     textColor = tempColor,
@@ -714,12 +934,13 @@ local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX
     minHorizontal = profile.minHorizontal,
     anchorSize = profile.anchorSize,
     textPixelHeight = textPixelHeight,
+    reservedRects = reservedRects,
   })
 
   local coreAnchorX = reactorX + math.floor(reactorW * profile.core.anchorRatioX)
   local coreAnchorY = reactorY + math.floor(reactorH * profile.core.anchorRatioY)
-  local coreElbowX = clampValue(coreAnchorX + profile.core.elbowDx, slotX + 1, slotX + slotW - 2)
-  local coreElbowY = clampValue(coreAnchorY + profile.core.elbowDy, slotY + 1, slotY + slotH - 2)
+  local coreElbowX = clampValue(coreAnchorX + scaleSigned(profile.core.elbowDx, 2), slotX + 1, slotX + slotW - 2)
+  local coreElbowY = clampValue(coreAnchorY + scaleSigned(profile.core.elbowDy, 2), slotY + 1, slotY + slotH - 2)
 
   drawCalloutLabel(args, {
     name = "CORE",
@@ -734,8 +955,8 @@ local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX
     anchorY = coreAnchorY,
     elbowX = coreElbowX,
     elbowY = coreElbowY,
-    endLen = profile.core.endLen,
-    textDy = profile.core.textDy,
+    endLen = scaleLength(profile.core.endLen, profile.minHorizontal),
+    textDy = scaleSigned(profile.core.textDy, 1),
     lineColor = tempColor,
     lineThickness = profile.lineThickness,
     textColor = tempColor,
@@ -745,6 +966,7 @@ local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX
     minHorizontal = profile.minHorizontal,
     anchorSize = profile.anchorSize,
     textPixelHeight = textPixelHeight,
+    reservedRects = reservedRects,
   })
 
   local portProfile = profile.ports
@@ -752,8 +974,8 @@ local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX
   for idx, channel in ipairs(PORT_CHANNELS) do
     local portAnchorX = reactorX + math.floor(reactorW * channel.ratio)
     local portAnchorY = reactorY + math.floor(reactorH * portProfile.anchorRatioY)
-    local portElbowX = clampValue(portAnchorX + (portProfile.elbowDx[idx] or 0), slotX + 1, slotX + slotW - 2)
-    local portElbowY = clampValue(portAnchorY + (portProfile.elbowDy[idx] or 0), slotY + 1, slotY + slotH - 2)
+    local portElbowX = clampValue(portAnchorX + scaleSigned(portProfile.elbowDx[idx] or 0, 1), slotX + 1, slotX + slotW - 2)
+    local portElbowY = clampValue(portAnchorY + scaleSigned(portProfile.elbowDy[idx] or 0, 1), slotY + 1, slotY + slotH - 2)
     local isOpen, source = resolvePortOpenState(data, channel.key)
     local labelText = formatPortStatus(profile, channel.key, isOpen)
     local side = portProfile.side[idx] or "right"
@@ -771,8 +993,8 @@ local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX
       anchorY = portAnchorY,
       elbowX = portElbowX,
       elbowY = portElbowY,
-      endLen = portProfile.endLen[idx] or 16,
-      textDy = portProfile.textDy[idx] or 0,
+      endLen = scaleLength(portProfile.endLen[idx] or 16, profile.minHorizontal),
+      textDy = scaleSigned(portProfile.textDy[idx] or 0, 1),
       lineColor = channel.color,
       lineThickness = profile.lineThickness,
       textColor = channel.color,
@@ -782,6 +1004,7 @@ local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX
       minHorizontal = profile.minHorizontal,
       anchorSize = profile.anchorSize,
       textPixelHeight = textPixelHeight,
+      reservedRects = reservedRects,
     })
 
     portTelemetrySummary[#portTelemetrySummary + 1] =
@@ -825,7 +1048,14 @@ function M.drawImageStack(args)
   local laserAssetName = tostring(args.laserAssetName or "none")
   local fallbackReactorVariant = args.fallbackReactorVariant
   local fallbackLaserVariant = args.fallbackLaserVariant
+  local responsiveOptions = type(args.responsiveOptions) == "table" and args.responsiveOptions or nil
+  local responsiveMode = resolveResponsiveMode(ui, responsiveOptions)
+  local responsiveFactor, responsiveEffectLevel = resolveResponsiveFactor(responsiveMode)
+  local reservedRects = normalizeReservedRects(responsiveOptions and responsiveOptions.reservedRects or nil)
+  local sceneViewport = responsiveOptions and responsiveOptions.sceneViewport or nil
   local stackCalibration = resolveStackCalibration(ui, args.state)
+  args.responsiveMode = responsiveMode
+  args.responsiveFactor = responsiveFactor
   if (not reactorPresent) and fallbackReactorVariant then
     reactorPresent = true
   end
@@ -839,6 +1069,50 @@ function M.drawImageStack(args)
   if slotW <= 0 or slotH <= 0 then
     return
   end
+
+  local viewportKey = table.concat({
+    tostring(slotX),
+    tostring(slotY),
+    tostring(slotW),
+    tostring(slotH),
+    tostring(responsiveMode),
+  }, "|")
+  if viewportKey ~= lastViewportKey then
+    appendRuntimeLog(
+      args,
+      "overview resize recompute: viewportKey changed"
+        .. " old=" .. tostring(lastViewportKey or "none")
+        .. " new=" .. viewportKey
+    )
+    calloutPlacementCache = {}
+    lastViewportKey = viewportKey
+  end
+
+  local viewportLogRect = sceneViewport or { x = slotX, y = slotY, w = slotW, h = slotH }
+  local responsiveContextKey = table.concat({
+    tostring(responsiveMode),
+    tostring(viewportLogRect.x),
+    tostring(viewportLogRect.y),
+    tostring(viewportLogRect.w),
+    tostring(viewportLogRect.h),
+    tostring(#reservedRects),
+  }, "|")
+  appendRuntimeLogOnce(
+    args,
+    "overview_responsive_context",
+    responsiveContextKey,
+    "overview responsive: mode=" .. tostring(responsiveMode)
+      .. " viewport=" .. tostring(viewportLogRect.x) .. "," .. tostring(viewportLogRect.y)
+      .. ":" .. tostring(viewportLogRect.w) .. "x" .. tostring(viewportLogRect.h)
+      .. " reserved=" .. tostring(#reservedRects)
+  )
+  appendRuntimeLogOnce(
+    args,
+    "overview_degradation_profile",
+    tostring(responsiveMode) .. "|" .. string.format("%.2f", responsiveFactor),
+    "overview degradation: effects=" .. tostring(responsiveEffectLevel)
+      .. " responsiveFactor=" .. string.format("%.2f", responsiveFactor)
+  )
 
   local configuredModuleCount = math.max(1, tonumber(control.laserModuleCount) or 1)
   local layout = forcedLayout
@@ -1016,7 +1290,25 @@ function M.drawImageStack(args)
   drawReactorCoreAnimationAt(args, reactorX, startY, reactorVariant.width, reactorVariant.height, data)
   drawReactorRightCableFluxAt(args, reactorX, startY, reactorVariant.width, reactorVariant.height, data)
   drawReactorBottomGasFluxAt(args, reactorX, startY, reactorVariant.width, reactorVariant.height, data)
-  drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX, slotY, slotW, slotH, reactorX, startY, reactorVariant.width, reactorVariant.height, data)
+  drawSceneAnnotations(
+    args,
+    drawTextCenter,
+    textPixelHeight,
+    slotX,
+    slotY,
+    slotW,
+    slotH,
+    reactorX,
+    startY,
+    reactorVariant.width,
+    reactorVariant.height,
+    data,
+    {
+      reservedRects = reservedRects,
+      responsiveMode = responsiveMode,
+      sceneViewport = { x = viewX, y = viewY, w = viewW, h = viewH },
+    }
+  )
 
   local renderedMode = moduleVariant and drawnModuleCount > 0 and "pair" or "reactor-only"
   local fillW = totalW / math.max(1, viewW)
@@ -1062,6 +1354,7 @@ function M.drawImageStack(args)
       .. " fillW=" .. string.format("%.2f", fillW)
       .. " fillH=" .. string.format("%.2f", fillH)
       .. " scenePadding=" .. tostring(topPad) .. "," .. tostring(bottomPad) .. "," .. tostring(sidePad)
+      .. " responsiveMode=" .. tostring(responsiveMode)
       .. " viewport=" .. tostring(slotW) .. "x" .. tostring(slotH)
   )
 

@@ -88,8 +88,34 @@ local function resolveDensity(ui)
   return 0.95
 end
 
+local function resolveResponsiveFactor(args)
+  local explicit = tonumber(args and args.responsiveFactor)
+  if explicit and explicit > 0 then
+    return explicit
+  end
+
+  local mode = tostring(args and args.responsiveMode or "")
+  if mode == "micro" then
+    return 0.62
+  end
+  if mode == "compact" then
+    return 0.82
+  end
+
+  local ui = args and args.ui
+  if ui and ui.micro then
+    return 0.62
+  end
+  if ui and ui.compact then
+    return 0.82
+  end
+  return 1.00
+end
+
 local function effectiveDensity(args, baseDensity)
   local density = baseDensity
+  local responsiveFactor = resolveResponsiveFactor(args)
+  density = density * responsiveFactor
   local visual = args and args.state and args.state.visual
   if visual and visual.effectLevel == "lite" then
     density = density * 0.70
@@ -206,6 +232,7 @@ local function drawHorizontalParticleFlow(args, spec)
   local reverse = spec.reverse == true
   local frame = (args.state and args.state.animTick) or 0
   local density = effectiveDensity(args, resolveDensity(args.ui))
+  local responsiveFactor = resolveResponsiveFactor(args)
   local intensity = spec.intensity or 1
   local style = getFlowStyle(mode)
 
@@ -217,9 +244,10 @@ local function drawHorizontalParticleFlow(args, spec)
   local packetHeightScale = spec.particleHeightScale or 0.86
   local packetW = math.max(1, math.floor(thickness * packetScale))
   local packetH = math.max(1, math.floor(thickness * packetHeightScale))
-  local trailSteps = (args.ui and (args.ui.micro or args.ui.compact)) and 1 or 2
+  local baseTrailSteps = (args.ui and (args.ui.micro or args.ui.compact)) and 1 or 2
+  local trailSteps = math.max(1, math.floor(baseTrailSteps * responsiveFactor + 0.2))
   local trailStep = math.max(1, math.floor(packetW * 0.90))
-  local speed = math.max(1, math.floor(style.speed * intensity))
+  local speed = math.max(1, math.floor(style.speed * intensity * responsiveFactor))
   local count = math.max(1, math.floor(style.count * density + 0.5))
   local jitterRange = (args.ui and args.ui.micro) and 0 or 1
 
@@ -275,6 +303,7 @@ local function drawVerticalParticleFlow(args, spec)
   local reverse = spec.reverse == true
   local frame = (args.state and args.state.animTick) or 0
   local density = effectiveDensity(args, resolveDensity(args.ui))
+  local responsiveFactor = resolveResponsiveFactor(args)
   local intensity = spec.intensity or 1
   local style = getFlowStyle(mode)
 
@@ -282,7 +311,7 @@ local function drawVerticalParticleFlow(args, spec)
   local axisGlow = spec.axisGlow or baseGlow
   local packetColor = spec.color or style.particle
   local trailColor = spec.trail or style.trail
-  local speed = math.max(1, math.floor((spec.speed or style.speed) * intensity))
+  local speed = math.max(1, math.floor((spec.speed or style.speed) * intensity * responsiveFactor))
   local count = math.max(1, math.floor((spec.count or style.count) * density + 0.5))
 
   local lineH = math.max(1, y2 - y1 + 1)
@@ -294,7 +323,8 @@ local function drawVerticalParticleFlow(args, spec)
   local travel = math.max(4, y2 - y1)
   local packetW = math.max(1, spec.packetW or thickness)
   local packetH = math.max(1, spec.packetH or math.floor(thickness * (args.ui and args.ui.micro and 1.1 or 1.5)))
-  local trailSteps = spec.trailSteps or ((args.ui and args.ui.micro) and 1 or 2)
+  local baseTrailSteps = spec.trailSteps or ((args.ui and args.ui.micro) and 1 or 2)
+  local trailSteps = math.max(1, math.floor(baseTrailSteps * responsiveFactor + 0.2))
   local trailStep = math.max(1, packetH)
 
   for i = 1, count do

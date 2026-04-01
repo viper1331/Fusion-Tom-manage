@@ -91,6 +91,30 @@ local function resolveCoreState(data)
   return "running"
 end
 
+local function resolveResponsiveFactor(args)
+  local explicit = tonumber(args and args.responsiveFactor)
+  if explicit and explicit > 0 then
+    return explicit
+  end
+
+  local mode = tostring(args and args.responsiveMode or "")
+  if mode == "micro" then
+    return 0.62
+  end
+  if mode == "compact" then
+    return 0.82
+  end
+
+  local ui = args and args.ui
+  if ui and ui.micro then
+    return 0.62
+  end
+  if ui and ui.compact then
+    return 0.82
+  end
+  return 1.00
+end
+
 local function drawSoftEllipse(args, cx, cy, radiusX, radiusY, color)
   local rx = math.max(1, math.floor(radiusX))
   local ry = math.max(1, math.floor(radiusY))
@@ -209,6 +233,9 @@ function M.draw(args, x, y, w, h, data)
   local style = buildStateStyle(data, coreState, frame)
   local ui = args.ui or {}
   local visual = args.state and args.state.visual
+  local responsiveFactor = resolveResponsiveFactor(args)
+  local responsiveScaleMul = 0.84 + (responsiveFactor * 0.16)
+  local responsiveHaloMul = 0.70 + (responsiveFactor * 0.30)
 
   local scale = 1.00
   if ui.micro then
@@ -221,6 +248,7 @@ function M.draw(args, x, y, w, h, data)
   elseif visual and visual.effectLevel == "minimal" then
     scale = scale * 0.80
   end
+  scale = scale * responsiveScaleMul
 
   local cx = x + math.floor(w * CALIBRATION.centerXRatio)
   local cy = y + math.floor(h * CALIBRATION.centerYRatio)
@@ -229,7 +257,7 @@ function M.draw(args, x, y, w, h, data)
   local baseRadiusY = math.max(3, math.floor(h * CALIBRATION.baseRadiusYRatio * scale))
   local pulse = pulseWave(frame + 3, style.pulsePeriod)
   local drift = (((frame * 11) % 17) / 17) * style.flicker
-  local haloFactor = (0.88 + (pulse * 0.16) + drift) * style.haloBoost
+  local haloFactor = (0.88 + (pulse * 0.16) + drift) * style.haloBoost * responsiveHaloMul
 
   local outerRx = math.max(3, math.floor(baseRadiusX * 1.95 * haloFactor))
   local outerRy = math.max(4, math.floor(baseRadiusY * 2.00 * haloFactor))
@@ -256,6 +284,7 @@ function M.draw(args, x, y, w, h, data)
     end
 
     local sparkCount = style.sparkCount
+    sparkCount = math.max(0, math.floor(sparkCount * responsiveFactor + 0.5))
     if visual and visual.effectLevel == "lite" then
       sparkCount = math.max(1, math.floor(sparkCount * 0.65))
     elseif visual and visual.effectLevel == "minimal" then
