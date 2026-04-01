@@ -1049,6 +1049,7 @@ local function loadScenePair(preferredTier, viewportW, viewportH)
               )
 
               local moduleSelected, moduleErrClass = tryDecodeVariant("laser_module", moduleVariant)
+              local pairFailureClass = moduleErrClass
               if moduleSelected then
                 local pairFits, pairRequiredW, pairRequiredH = pairFitsViewport(reactorSelected, moduleSelected, viewportW, viewportH)
                 if not pairFits then
@@ -1059,6 +1060,7 @@ local function loadScenePair(preferredTier, viewportW, viewportH)
                       .. " viewport=" .. tostring(viewportW or "n/a") .. "x" .. tostring(viewportH or "n/a")
                       .. " required=" .. tostring(pairRequiredW) .. "x" .. tostring(pairRequiredH)
                   )
+                  pairFailureClass = "viewport_overflow"
                   moduleSelected = nil
                   pcall(collectgarbage, "collect")
                 else
@@ -1097,17 +1099,19 @@ local function loadScenePair(preferredTier, viewportW, viewportH)
                 end
               end
 
-              if moduleErrClass == "vram_alloc_failed" then
+              if pairFailureClass == "vram_alloc_failed" then
                 sawVramError = true
               end
 
-              appendUiRuntimeLog(
-                "asset pair failed: class=" .. tostring(moduleErrClass or "decode_failed")
-                  .. " reactorVariant=" .. tostring(reactorVariant.name)
-                  .. " moduleVariant=" .. tostring(moduleVariant.name)
-                  .. " reactorTier=" .. tostring(reactorTier)
-                  .. " moduleTier=" .. tostring(moduleTier)
-              )
+              if pairFailureClass then
+                appendUiRuntimeLog(
+                  "asset pair failed: class=" .. tostring(pairFailureClass)
+                    .. " reactorVariant=" .. tostring(reactorVariant.name)
+                    .. " moduleVariant=" .. tostring(moduleVariant.name)
+                    .. " reactorTier=" .. tostring(reactorTier)
+                    .. " moduleTier=" .. tostring(moduleTier)
+                )
+              end
             end
           end
         end
@@ -1317,6 +1321,7 @@ local lastLayoutFallbackLogKey = nil
 local lastLayoutFallbackRejectLogKey = nil
 local lastLayoutVisualRejectLogKey = nil
 local lastLayoutHardRejectLogKey = nil
+local lastOverviewPairReductionLogKey = nil
 
 local function resolveOverviewVisualBounds(slotW, slotH, spacing)
   local sidePad = math.max(0, math.floor(spacing.sidePad or 0))
@@ -1606,14 +1611,47 @@ end
 
 local function chooseOverviewStackLayout(slotW, slotH, configuredModuleCount)
   local maxCount = math.max(1, tonumber(configuredModuleCount) or 1)
+  local reactorOnlyFallback = nil
 
   for count = maxCount, 0, -1 do
     local layout = chooseStackLayout(slotW, slotH, count)
     if layout and layout.reactor then
       layout.configuredModuleCount = maxCount
-      layout.drawnModuleCount = count
-      return layout
+      layout.drawnModuleCount = layout.module and count or 0
+
+      if layout.module then
+        if count < maxCount then
+          local reductionLogKey = table.concat({
+            tostring(slotW),
+            tostring(slotH),
+            tostring(maxCount),
+            tostring(count),
+            tostring(layout.reactor and layout.reactor.name or "none"),
+            tostring(layout.module and layout.module.name or "none"),
+          }, "|")
+          if reductionLogKey ~= lastOverviewPairReductionLogKey then
+            appendUiRuntimeLog(
+              "overview layout: pair selected with reduced modules"
+                .. " configured=" .. tostring(maxCount)
+                .. " drawn=" .. tostring(count)
+                .. " slot=" .. tostring(slotW) .. "x" .. tostring(slotH)
+                .. " reactor=" .. tostring(layout.reactor and layout.reactor.name or "none")
+                .. " module=" .. tostring(layout.module and layout.module.name or "none")
+            )
+            lastOverviewPairReductionLogKey = reductionLogKey
+          end
+        end
+        return layout
+      end
+
+      if not reactorOnlyFallback then
+        reactorOnlyFallback = layout
+      end
     end
+  end
+
+  if reactorOnlyFallback then
+    return reactorOnlyFallback
   end
 
   return nil
