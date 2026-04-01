@@ -1,6 +1,6 @@
 {
     "name":  "Fusion-Tom-manage",
-    "version":  "1.2.26",
+    "version":  "1.2.27",
     "channel":  "stable",
     "entrypoint":  "start.lua",
     "source":  {
@@ -8,7 +8,7 @@
                    "repo":  "Fusion-Tom-manage",
                    "branch":  "main",
                    "manifestPath":  "fusion.manifest.json",
-                   "commit":  "a969ac3c577299c010b059c0f13dfbcfb7fa66b8"
+                   "commit":  "944c16feb35ece51b177bdfd0ac5e0c592af6785"
                },
     "integrity":  {
                       "mode":  "hash+size",
@@ -41,7 +41,7 @@
                   {
                       "path":  "fusion.version",
                       "size":  7,
-                      "hash":  "5e649074bdab71dd8d8ba9d69ae72cc2d27fd4c49fe300314ff8f48d162391d5",
+                      "hash":  "76207433f29cdbce79c075979eb2f243b6999dbd5c87b14df9eab20a52d0ad42",
                       "hashAlgo":  "sha256"
                   },
                   {
@@ -238,8 +238,8 @@
                   },
                   {
                       "path":  "ui/pages/overview_graphics.lua",
-                      "size":  20969,
-                      "hash":  "33a64bb7ca725e4efce96b6aa85ee85d4f0e4924bbd2aacacf76e601623d4b88",
+                      "size":  26571,
+                      "hash":  "1107a815d6af761926b06c86eb08d2d2518e919634249763c916a2f17b227b2d",
                       "hashAlgo":  "sha256"
                   },
                   {
@@ -283,7 +283,13 @@
                       "size":  116107,
                       "hash":  "7064afe922ac91eb38d536a220aa078a782cd773b84c33bf95d54cef600cb25b",
                       "hashAlgo":  "sha256"
+                  },
+                  {
+                      "path":  "rescue_update.lua",
+                      "size":  11120,
+                      "hash":  "35e9f6195d08eafa9a26843cc983c9d218e3e4eb54fc303f131bb139a5d663c1",
+                      "hashAlgo":  "sha256"
                   }
               ],
-    "commit":  "a969ac3c577299c010b059c0f13dfbcfb7fa66b8"
+    "commit":  "944c16feb35ece51b177bdfd0ac5e0c592af6785"
 }
