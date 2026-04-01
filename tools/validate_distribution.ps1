@@ -141,12 +141,12 @@ if ($null -ne $manifest) {
     }
 
     $legacyShimPath = "start_menu_pages_live_v7.lua"
-    if (Test-Path -LiteralPath $legacyShimPath -and -not $filePaths.Contains($legacyShimPath)) {
+    if ((Test-Path -LiteralPath $legacyShimPath) -and (-not $filePaths.Contains($legacyShimPath))) {
       $errors.Add("legacy shim missing in manifest.files: $legacyShimPath")
     }
 
     $rescuePath = "rescue_update.lua"
-    if (Test-Path -LiteralPath $rescuePath -and -not $filePaths.Contains($rescuePath)) {
+    if ((Test-Path -LiteralPath $rescuePath) -and (-not $filePaths.Contains($rescuePath))) {
       $errors.Add("rescue mode missing in manifest.files: $rescuePath")
     }
 
