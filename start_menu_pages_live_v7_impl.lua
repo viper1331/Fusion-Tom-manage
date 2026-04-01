@@ -793,20 +793,24 @@ end
 
 local function resolveOverviewStackSpacing()
   local smallPad = ui and ui.smallPad or 0
-  local moduleGapMul = 0.48
-  local reactorGapMul = 1.65
-  local stackOffsetY = 0
+  local moduleGapMul = 0.46
+  local reactorGapMul = 1.92
+  local stackOffsetY = 2
+  local moduleOffsetX = -1
+  local reactorOffsetX = 0
 
   if ui and ui.compact then
-    moduleGapMul = 0.44
-    reactorGapMul = 1.50
+    moduleGapMul = 0.42
+    reactorGapMul = 1.70
     stackOffsetY = 1
+    moduleOffsetX = -1
   end
 
   if ui and ui.micro then
-    moduleGapMul = 0.40
-    reactorGapMul = 1.25
+    moduleGapMul = 0.38
+    reactorGapMul = 1.40
     stackOffsetY = 0
+    moduleOffsetX = 0
   end
 
   local moduleGap = math.max(1, math.floor(smallPad * moduleGapMul))
@@ -816,6 +820,8 @@ local function resolveOverviewStackSpacing()
     moduleGap = moduleGap,
     reactorGap = reactorGap,
     stackOffsetY = stackOffsetY,
+    moduleOffsetX = moduleOffsetX,
+    reactorOffsetX = reactorOffsetX,
   }
 end
 
@@ -1332,6 +1338,8 @@ local function chooseStackLayout(slotW, slotH, moduleCount)
         moduleGap = moduleGap,
         reactorGap = gap,
         stackOffsetY = spacing.stackOffsetY,
+        moduleOffsetX = spacing.moduleOffsetX,
+        reactorOffsetX = spacing.reactorOffsetX,
       }
     end
 
@@ -1354,6 +1362,8 @@ local function chooseStackLayout(slotW, slotH, moduleCount)
             moduleGap = moduleGap,
             reactorGap = gap,
             stackOffsetY = spacing.stackOffsetY,
+            moduleOffsetX = spacing.moduleOffsetX,
+            reactorOffsetX = spacing.reactorOffsetX,
           }
         end
       end
@@ -1395,6 +1405,8 @@ local function chooseStackLayout(slotW, slotH, moduleCount)
       moduleGap = moduleGap,
       reactorGap = gap,
       stackOffsetY = spacing.stackOffsetY,
+      moduleOffsetX = spacing.moduleOffsetX,
+      reactorOffsetX = spacing.reactorOffsetX,
     }
   elseif fallbackReactor then
     local rejectLogKey = table.concat({
