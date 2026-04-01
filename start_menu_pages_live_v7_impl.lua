@@ -99,32 +99,14 @@ local function normalizeIntegrityMode(value)
   return "size+hash"
 end
 
+local OverviewValidation = assert(dofile("core/runtime/overview_validation.lua"))
+
 local function normalizeOverviewValidationSource(value)
-  local raw = string.lower(nonEmptyString(value) or "")
-  if raw == "simulate" or raw == "simulated" or raw == "simulation" then
-    return "simulate"
-  end
-  return "terrain"
+  return OverviewValidation.normalizeSource(value)
 end
 
 local function normalizeOverviewValidationScenario(value)
-  local raw = string.lower(nonEmptyString(value) or "")
-  if raw == "formed" then
-    return "formed"
-  end
-  if raw == "ignited" then
-    return "ignited"
-  end
-  if raw == "running" then
-    return "running"
-  end
-  if raw == "warning" then
-    return "warning"
-  end
-  if raw == "scram" then
-    return "scram"
-  end
-  return "offline"
+  return OverviewValidation.normalizeScenario(value)
 end
 
 local GPU_MODE = DEFAULTS.runtime.gpuMode
@@ -202,6 +184,7 @@ local NavigationView = assert(dofile("ui/components/navigation.lua"))
 local UpdatePageView = assert(dofile("ui/pages/update_page.lua"))
 local ControlPageView = assert(dofile("ui/pages/control_page.lua"))
 local FuelPageView = assert(dofile("ui/pages/fuel_page.lua"))
+local OverviewCalibration = assert(dofile("ui/pages/overview_calibration.lua"))
 local OverviewPageView = assert(dofile("ui/pages/overview_page.lua"))
 local OverviewGraphicsView = assert(dofile("ui/pages/overview_graphics.lua"))
 local TelemetryRuntime = assert(dofile("core/runtime/telemetry_runtime.lua"))
@@ -839,56 +822,23 @@ local function isTierPairCompatible(reactorTier, moduleTier)
 end
 
 local function resolveOverviewStackSpacing()
+  -- Keep a single source of truth for OVERVIEW spacing calibration.
+  local profile = OverviewCalibration.resolveStackProfile(ui)
   local smallPad = ui and ui.smallPad or 0
-  local moduleGapMul = 0.46
-  local reactorGapMul = 2.28
-  local stackOffsetY = 4
-  local moduleOffsetX = 0
-  local reactorOffsetX = 0
-  local topPad = 6
-  local bottomPad = 4
-  local sidePad = 2
-  local maxWFill = 0.92
-  local maxHFill = 0.88
-
-  if ui and ui.compact then
-    moduleGapMul = 0.42
-    reactorGapMul = 2.00
-    stackOffsetY = 3
-    moduleOffsetX = 0
-    topPad = 5
-    bottomPad = 3
-    sidePad = 2
-    maxWFill = 0.90
-    maxHFill = 0.86
-  end
-
-  if ui and ui.micro then
-    moduleGapMul = 0.38
-    reactorGapMul = 1.70
-    stackOffsetY = 2
-    moduleOffsetX = 0
-    topPad = 4
-    bottomPad = 2
-    sidePad = 1
-    maxWFill = 0.88
-    maxHFill = 0.84
-  end
-
-  local moduleGap = math.max(1, math.floor(smallPad * moduleGapMul))
-  local reactorGap = math.max(2, math.floor(smallPad * reactorGapMul))
+  local moduleGap = math.max(1, math.floor(smallPad * (profile.moduleGapMul or 0)))
+  local reactorGap = math.max(2, math.floor(smallPad * (profile.reactorGapMul or 0)))
 
   return {
     moduleGap = moduleGap,
     reactorGap = reactorGap,
-    stackOffsetY = stackOffsetY,
-    moduleOffsetX = moduleOffsetX,
-    reactorOffsetX = reactorOffsetX,
-    topPad = topPad,
-    bottomPad = bottomPad,
-    sidePad = sidePad,
-    maxWFill = maxWFill,
-    maxHFill = maxHFill,
+    stackOffsetY = profile.stackOffsetY or 0,
+    moduleOffsetX = profile.moduleOffsetX or 0,
+    reactorOffsetX = profile.reactorOffsetX or 0,
+    topPad = profile.topPad or 0,
+    bottomPad = profile.bottomPad or 0,
+    sidePad = profile.sidePad or 0,
+    maxWFill = profile.maxWFill or 1,
+    maxHFill = profile.maxHFill or 1,
   }
 end
 
@@ -3392,177 +3342,9 @@ local function drawSystemPage(r, data)
   drawTextRight(innerX + innerW - ui.smallPad, infoBaseY + sv(54), data.transferLossText, C.orange, 1)
 end
 
-local OVERVIEW_VALIDATION_SCENARIOS = {
-  offline = {
-    logicPresent = false,
-    formed = false,
-    ignited = false,
-    status = "OFFLINE",
-    stateText = "OFFLINE / NOT FORMED",
-    logicMode = "OFFLINE",
-    alerts = "logic adapter offline",
-    productionRate = 0,
-    caseMK = 0.2,
-    plasmaMK = 0.3,
-    dtPct = 0.0,
-    dPct = 0.0,
-    tPct = 0.0,
-    laserAmplifierPct = 0.0,
-    hohlraumLoaded = false,
-    flow = { tritium = false, dtFuel = false, deuterium = false },
-  },
-  formed = {
-    logicPresent = true,
-    formed = true,
-    ignited = false,
-    status = "FORMED",
-    stateText = "FORMED / STANDBY",
-    logicMode = "STANDBY",
-    alerts = "none",
-    productionRate = 0,
-    caseMK = 4.2,
-    plasmaMK = 8.7,
-    dtPct = 1.5,
-    dPct = 12.0,
-    tPct = 10.0,
-    laserAmplifierPct = 0.35,
-    hohlraumLoaded = true,
-    flow = { tritium = false, dtFuel = false, deuterium = false },
-  },
-  ignited = {
-    logicPresent = true,
-    formed = true,
-    ignited = true,
-    status = "STABLE",
-    stateText = "FORMED / ONLINE / SAFE",
-    logicMode = "IGNITION",
-    alerts = "none",
-    productionRate = 2200000,
-    caseMK = 22.4,
-    plasmaMK = 74.8,
-    dtPct = 42.0,
-    dPct = 61.0,
-    tPct = 58.0,
-    laserAmplifierPct = 1.0,
-    hohlraumLoaded = true,
-    flow = { tritium = true, dtFuel = true, deuterium = true },
-  },
-  running = {
-    logicPresent = true,
-    formed = true,
-    ignited = true,
-    status = "STABLE",
-    stateText = "FORMED / ONLINE / SAFE",
-    logicMode = "RUNNING",
-    alerts = "none",
-    productionRate = 9800000,
-    caseMK = 39.6,
-    plasmaMK = 112.4,
-    dtPct = 74.0,
-    dPct = 77.0,
-    tPct = 79.0,
-    laserAmplifierPct = 0.92,
-    hohlraumLoaded = true,
-    flow = { tritium = true, dtFuel = true, deuterium = true },
-  },
-  warning = {
-    logicPresent = true,
-    formed = true,
-    ignited = true,
-    status = "WARNING",
-    stateText = "FORMED / ONLINE / CHECK",
-    logicMode = "RUNNING",
-    alerts = "dt low",
-    productionRate = 6400000,
-    caseMK = 44.1,
-    plasmaMK = 129.3,
-    dtPct = 2.3,
-    dPct = 38.0,
-    tPct = 33.0,
-    laserAmplifierPct = 0.82,
-    hohlraumLoaded = true,
-    flow = { tritium = true, dtFuel = false, deuterium = true },
-  },
-  scram = {
-    logicPresent = true,
-    formed = true,
-    ignited = false,
-    status = "SCRAM",
-    stateText = "FORMED / SCRAM",
-    logicMode = "SCRAM",
-    alerts = "scram active",
-    productionRate = 0,
-    caseMK = 18.9,
-    plasmaMK = 52.0,
-    dtPct = 0.5,
-    dPct = 8.0,
-    tPct = 7.0,
-    laserAmplifierPct = 0.0,
-    hohlraumLoaded = false,
-    flow = { tritium = false, dtFuel = false, deuterium = false },
-  },
-}
-
-local function formatValidationMkText(value)
-  return string.format("%.1f MK", tonumber(value) or 0)
-end
-
 local function applyOverviewValidationScenario(baseData, scenario)
-  local profile = OVERVIEW_VALIDATION_SCENARIOS[scenario] or OVERVIEW_VALIDATION_SCENARIOS.offline
-  local data = deepCopy(baseData or {})
-  local flow = profile.flow or {}
-
-  data.logicPresent = profile.logicPresent == true
-  data.formed = profile.formed == true
-  data.ignited = profile.ignited == true
-  data.online = data.formed and data.ignited
-  data.status = profile.status
-  data.stateText = profile.stateText
-  data.logicMode = profile.logicMode
-  data.alerts = profile.alerts
-  data.alertList = (profile.alerts == "none") and {} or { profile.alerts }
-  data.productionRate = tonumber(profile.productionRate) or 0
-  data.productionText = tostring(math.floor((data.productionRate or 0) + 0.5)) .. " FE/t"
-  data.caseMK = tonumber(profile.caseMK) or 0
-  data.plasmaMK = tonumber(profile.plasmaMK) or 0
-  data.caseRaw = data.caseMK * 1000000
-  data.plasmaRaw = data.plasmaMK * 1000000
-  data.caseText = formatValidationMkText(data.caseMK)
-  data.plasmaText = formatValidationMkText(data.plasmaMK)
-  data.dtPct = tonumber(profile.dtPct) or 0
-  data.dPct = tonumber(profile.dPct) or 0
-  data.tPct = tonumber(profile.tPct) or 0
-  data.laserAmplifierPct = tonumber(profile.laserAmplifierPct) or 0
-  data.laserReady = data.laserAmplifierPct >= 0.99
-  data.hohlraumLoaded = profile.hohlraumLoaded == true
-  data.maintenance = false
-
-  data.readers = type(data.readers) == "table" and data.readers or {}
-  local function assignReader(reader, isOpen, pctValue)
-    local out = type(reader) == "table" and reader or {}
-    out.ok = true
-    out.active = isOpen
-    out.amount = isOpen and math.max(1, math.floor((pctValue or 0) * 10)) or 0
-    out.currentRedstone = isOpen and 15 or 0
-    out.redstone = isOpen and 15 or 0
-    return out
-  end
-  data.readers.tritium = assignReader(data.readers.tritium, flow.tritium == true, data.tPct)
-  data.readers.dtFuel = assignReader(data.readers.dtFuel, flow.dtFuel == true, data.dtPct)
-  data.readers.deuterium = assignReader(data.readers.deuterium, flow.deuterium == true, data.dPct)
-  data.readers.active = type(data.readers.active) == "table" and data.readers.active or {}
-  data.readers.active.ok = true
-  data.readers.active.active = data.ignited
-  data.activeReader = data.readers.active.active and "ACTIVE" or "IDLE"
-  data.activeReaderColor = data.readers.active.active and C.green or C.muted
-
-  data.relayStates = type(data.relayStates) == "table" and data.relayStates or {}
-  data.relayStates.tritiumTank = flow.tritium == true
-  data.relayStates.deuteriumTank = flow.deuterium == true
-  data.relayStates.laserCharge = false
-  data.relayStates.aux = false
-
-  return data
+  -- Keep OVERVIEW validation simulation isolated from the runtime entrypoint.
+  return OverviewValidation.applyScenario(baseData, scenario, { colors = C })
 end
 
 local lastOverviewValidationLogKey = nil
