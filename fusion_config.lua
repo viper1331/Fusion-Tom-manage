@@ -46,4 +46,8 @@ return {
     requireConfirmApply = true,
     autoCheckOnStartup = false,
   },
+  validation = {
+    overviewSource = "terrain",
+    overviewScenario = "offline",
+  },
 }

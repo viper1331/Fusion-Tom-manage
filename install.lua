@@ -53,6 +53,10 @@ local defaults = {
     requireConfirmApply = true,
     autoCheckOnStartup = false,
   },
+  validation = {
+    overviewSource = "terrain",
+    overviewScenario = "offline",
+  },
 }
 
 local cfg = textutils.unserialize(textutils.serialize(defaults))
@@ -280,6 +284,8 @@ local function summary()
   print("Update branch: " .. tostring(cfg.update.branch))
   print("Integrity mode: " .. tostring(cfg.update.integrityMode))
   print("Auto-check: " .. tostring(cfg.update.autoCheckOnStartup))
+  print("Validation source: " .. tostring((cfg.validation and cfg.validation.overviewSource) or "terrain"))
+  print("Validation scenario: " .. tostring((cfg.validation and cfg.validation.overviewScenario) or "offline"))
   print("")
   print("Sauvegarder ? (o/n)")
   local a = read()
