@@ -1,6 +1,6 @@
 {
     "name":  "Fusion-Tom-manage",
-    "version":  "1.2.35",
+    "version":  "1.2.36",
     "channel":  "stable",
     "entrypoint":  "start.lua",
     "source":  {
