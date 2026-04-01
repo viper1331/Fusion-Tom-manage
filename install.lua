@@ -57,6 +57,16 @@ local defaults = {
     overviewSource = "terrain",
     overviewScenario = "offline",
   },
+  logging = {
+    level = "INFO",
+    files = {
+      runtime = "ui_runtime.log",
+      update = "update.log",
+      rescue = "/rescue_update.log",
+    },
+    telemetrySnapshotSeconds = 10,
+    loopEventDebug = false,
+  },
 }
 
 local cfg = textutils.unserialize(textutils.serialize(defaults))
@@ -264,6 +274,21 @@ local function stepUpdate()
   cfg.update.autoCheckOnStartup = promptBool(cfg.update.autoCheckOnStartup, "Auto CHECK au demarrage")
 end
 
+local function stepLogging()
+  title("Etape 9 - Logging")
+  cfg.logging.level = string.upper(prompt(cfg.logging.level, "Niveau logs (DEBUG/INFO/WARN/ERROR)"))
+  cfg.logging.files.runtime = prompt(cfg.logging.files.runtime, "Fichier log runtime")
+  cfg.logging.files.update = prompt(cfg.logging.files.update, "Fichier log MAJ")
+  cfg.logging.files.rescue = prompt(cfg.logging.files.rescue, "Fichier log rescue")
+  cfg.logging.telemetrySnapshotSeconds = promptNumber(
+    cfg.logging.telemetrySnapshotSeconds,
+    "Snapshot telemetrie (secondes)",
+    1,
+    120
+  )
+  cfg.logging.loopEventDebug = promptBool(cfg.logging.loopEventDebug, "Activer debug boucle event")
+end
+
 local function writeConfig(path, data)
   local fh = assert(fs.open(path, "w"))
   fh.write("return ")
@@ -286,6 +311,10 @@ local function summary()
   print("Auto-check: " .. tostring(cfg.update.autoCheckOnStartup))
   print("Validation source: " .. tostring((cfg.validation and cfg.validation.overviewSource) or "terrain"))
   print("Validation scenario: " .. tostring((cfg.validation and cfg.validation.overviewScenario) or "offline"))
+  print("Log level: " .. tostring((cfg.logging and cfg.logging.level) or "INFO"))
+  print("Log runtime: " .. tostring((cfg.logging and cfg.logging.files and cfg.logging.files.runtime) or "ui_runtime.log"))
+  print("Log update: " .. tostring((cfg.logging and cfg.logging.files and cfg.logging.files.update) or "update.log"))
+  print("Log rescue: " .. tostring((cfg.logging and cfg.logging.files and cfg.logging.files.rescue) or "/rescue_update.log"))
   print("")
   print("Sauvegarder ? (o/n)")
   local a = read()
@@ -308,4 +337,5 @@ stepRelays()
 stepRelaySides()
 stepControl()
 stepUpdate()
+stepLogging()
 summary()

@@ -20,6 +20,14 @@ local PRESERVE_LOCAL = {
 }
 
 local AUTO_LAUNCH_AFTER_UPDATE = false
+local LoggerModule = nil
+do
+  local ok, loaded = pcall(dofile, "core/logging/logger.lua")
+  if ok and type(loaded) == "table" and type(loaded.create) == "function" then
+    LoggerModule = loaded
+  end
+end
+local rescueLogger = nil
 
 local function nowIso()
   local t = os.date("*t")
@@ -44,9 +52,43 @@ local function ensureDir(path)
   end
 end
 
-local function appendLog(level, message)
-  local line = string.format("[%s] [%s] %s", nowIso(), level, tostring(message))
+local function normalizeLogLevel(value)
+  local raw = string.upper(tostring(value or "INFO"))
+  if raw == "DEBUG" or raw == "INFO" or raw == "WARN" or raw == "ERROR" then
+    return raw
+  end
+  return "INFO"
+end
+
+local function loggerWrite(level, category, message, context)
+  if not rescueLogger then
+    return false
+  end
+
+  local method = string.lower(normalizeLogLevel(level))
+  local fn = rescueLogger[method]
+  if type(fn) == "function" then
+    fn(category or "RESCUE", tostring(message), context, "rescue")
+    return true
+  end
+
+  if type(rescueLogger.info) == "function" then
+    rescueLogger.info(category or "RESCUE", tostring(message), context, "rescue")
+    return true
+  end
+
+  return false
+end
+
+local function appendLog(level, message, category, context)
+  local normalizedLevel = normalizeLogLevel(level)
+  local finalCategory = tostring(category or "RESCUE")
+  local line = string.format("[%s] [%s] [%s] %s", nowIso(), normalizedLevel, finalCategory, tostring(message))
   print(line)
+
+  if loggerWrite(normalizedLevel, finalCategory, message, context) then
+    return
+  end
 
   local dir = parentDir(PATHS.logFile)
   if dir and dir ~= "" then
@@ -109,16 +151,35 @@ local function loadRuntimeSource()
     repo = DEFAULT_SOURCE.repo,
     branch = DEFAULT_SOURCE.branch,
     manifestPath = DEFAULT_SOURCE.manifestPath,
+    logging = {
+      level = "INFO",
+      files = {
+        runtime = "ui_runtime.log",
+        update = "update.log",
+        rescue = PATHS.logFile,
+      },
+    },
   }
 
   local ok, cfg = pcall(dofile, "fusion_config.lua")
-  if ok and type(cfg) == "table" and type(cfg.update) == "table" then
-    source.owner = firstTruthyString(cfg.update.owner, source.owner)
-    source.repo = firstTruthyString(cfg.update.repo, source.repo)
-    source.branch = firstTruthyString(cfg.update.branch, source.branch)
-    source.manifestPath = firstTruthyString(cfg.update.manifestPath, source.manifestPath)
+  if ok and type(cfg) == "table" then
+    if type(cfg.update) == "table" then
+      source.owner = firstTruthyString(cfg.update.owner, source.owner)
+      source.repo = firstTruthyString(cfg.update.repo, source.repo)
+      source.branch = firstTruthyString(cfg.update.branch, source.branch)
+      source.manifestPath = firstTruthyString(cfg.update.manifestPath, source.manifestPath)
+    end
+    if type(cfg.logging) == "table" then
+      source.logging.level = normalizeLogLevel(cfg.logging.level or source.logging.level)
+      if type(cfg.logging.files) == "table" then
+        source.logging.files.runtime = firstTruthyString(cfg.logging.files.runtime, source.logging.files.runtime)
+        source.logging.files.update = firstTruthyString(cfg.logging.files.update, source.logging.files.update)
+        source.logging.files.rescue = firstTruthyString(cfg.logging.files.rescue, source.logging.files.rescue)
+      end
+    end
   end
 
+  PATHS.logFile = source.logging.files.rescue
   return source
 end
 
@@ -297,6 +358,13 @@ local function main()
   end
 
   local source = loadRuntimeSource()
+  if LoggerModule then
+    rescueLogger = LoggerModule.create({
+      level = source.logging.level,
+      defaultSink = "rescue",
+      files = source.logging.files,
+    })
+  end
   appendLog("INFO", "source owner=" .. source.owner .. " repo=" .. source.repo .. " branch=" .. source.branch)
 
   cleanupStaging()

@@ -50,4 +50,14 @@ return {
     overviewSource = "terrain",
     overviewScenario = "offline",
   },
+  logging = {
+    level = "INFO",
+    files = {
+      runtime = "ui_runtime.log",
+      update = "update.log",
+      rescue = "/rescue_update.log",
+    },
+    telemetrySnapshotSeconds = 10,
+    loopEventDebug = false,
+  },
 }

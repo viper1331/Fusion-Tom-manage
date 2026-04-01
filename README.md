@@ -35,6 +35,33 @@ Chemins utilises par le mode secours:
 - `ROLLBACK` : restauration depuis `backup_last`
 - `RESTART` : relance propre du programme
 
+## Logs structures
+
+Le projet utilise une couche commune `core/logging/logger.lua` avec format homogene:
+
+`[YYYY-MM-DD HH:MM:SS] [LEVEL] [CATEGORY] message | k=v ...`
+
+Sorties par defaut:
+- runtime UI: `ui_runtime.log`
+- update: `update.log`
+- rescue: `/rescue_update.log`
+
+Niveaux disponibles dans `fusion_config.lua`:
+- `DEBUG`
+- `INFO` (defaut)
+- `WARN`
+- `ERROR`
+
+Categories couvertes:
+- `BOOT`, `ROUTER`, `LOOP`, `INPUT`
+- `TELEMETRY`, `ACTIONS`
+- `OVERVIEW`, `ASSETS`, `ANIMATIONS`, `GPU`
+- `UPDATE`, `RESCUE`
+
+Options de config:
+- `logging.telemetrySnapshotSeconds` pour la periodicite des snapshots telemetrie
+- `logging.loopEventDebug` pour activer le debug event loop
+
 ## Publication manifest
 
 - Le manifest distant est lu sur la branche configuree.

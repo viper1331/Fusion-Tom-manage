@@ -61,9 +61,55 @@ function M.create(args)
   local colors = args.colors
   local clamp = args.clamp
   local round = args.round
+  local logger = args.logger
+  local loggingCfg = type(args.logging) == "table" and args.logging or {}
 
   local wrappedCache = {}
   local modem = nil
+  local modemReadyLogged = false
+  local lastTelemetrySnapshotKey = nil
+  local lastTelemetrySnapshotAt = 0
+  local telemetrySnapshotMs = math.max(1000, math.floor((tonumber(loggingCfg.telemetrySnapshotSeconds) or 10) * 1000))
+  local lastPresenceKey = nil
+
+  local function logWithLevel(level, category, message, context)
+    if not logger then
+      return
+    end
+
+    local method = string.lower(tostring(level or "info"))
+    local fn = logger[method]
+    if type(fn) == "function" then
+      fn(category, message, context, "runtime")
+      return
+    end
+
+    if type(logger.info) == "function" then
+      logger.info(category, message, context, "runtime")
+    end
+  end
+
+  local function logOnce(key, level, category, message, context)
+    if logger and type(logger.once) == "function" then
+      logger.once(key, level, category, message, context, "runtime")
+      return
+    end
+    logWithLevel(level, category, message, context)
+  end
+
+  local function logThrottle(key, intervalMs, level, category, message, context)
+    if logger and type(logger.throttle) == "function" then
+      logger.throttle(key, intervalMs, level, category, message, context, "runtime")
+      return
+    end
+    logWithLevel(level, category, message, context)
+  end
+
+  logWithLevel("INFO", "TELEMETRY", "telemetry runtime initialized", {
+    pollMs = tonumber(control and control.telemetryPollMs) or 0,
+    snapshotMs = telemetrySnapshotMs,
+    modem = tostring(devices and devices.modem or "n/a"),
+  })
 
   local function refreshWrapped(name)
     if type(name) ~= "string" or name == "" then
@@ -73,10 +119,16 @@ function M.create(args)
     local ok, obj = pcall(peripheral.wrap, name)
     if ok and obj then
       wrappedCache[name] = obj
+      logOnce("telemetry.wrap.ok." .. tostring(name), "INFO", "TELEMETRY", "device wrapped", {
+        device = tostring(name),
+      })
       return obj
     end
 
     wrappedCache[name] = false
+    logOnce("telemetry.wrap.fail." .. tostring(name), "WARN", "TELEMETRY", "device wrap failed", {
+      device = tostring(name),
+    })
     return nil
   end
 
@@ -103,10 +155,22 @@ function M.create(args)
 
     modem = getWrapped(devices.modem)
     if modem and type(modem.getNamesRemote) == "function" then
+      if not modemReadyLogged then
+        logWithLevel("INFO", "TELEMETRY", "modem fallback ready", {
+          modem = tostring(devices.modem),
+        })
+        modemReadyLogged = true
+      end
       return modem
     end
 
     modem = nil
+    if modemReadyLogged then
+      logWithLevel("WARN", "TELEMETRY", "modem fallback unavailable", {
+        modem = tostring(devices.modem),
+      })
+      modemReadyLogged = false
+    end
     return nil
   end
 
@@ -116,27 +180,77 @@ function M.create(args)
     end
 
     wrappedCache[name] = nil
+    logWithLevel("INFO", "TELEMETRY", "device cache invalidated", {
+      device = tostring(name),
+    })
   end
 
   local function safeCall(name, method, ...)
     if type(name) ~= "string" or name == "" then
+      logOnce("telemetry.safecall.invalid." .. tostring(method), "WARN", "TELEMETRY", "safeCall invalid device", {
+        method = tostring(method),
+      })
       return false, "invalid device"
     end
 
+    local localErr = nil
     local obj = getWrapped(name)
     if obj and type(obj[method]) == "function" then
       local ok, result1, result2, result3, result4, result5 = pcall(obj[method], ...)
       if ok then
         return true, result1, result2, result3, result4, result5
       end
+      localErr = result1
+      logThrottle(
+        "telemetry.safecall.local.fail." .. tostring(name) .. "." .. tostring(method),
+        5000,
+        "WARN",
+        "TELEMETRY",
+        "safeCall local peripheral failed",
+        {
+          device = tostring(name),
+          method = tostring(method),
+          error = tostring(localErr),
+        }
+      )
     end
 
+    local remoteErr = nil
     local back = getModem()
     if back and type(back.callRemote) == "function" then
       local ok, result1, result2, result3, result4, result5 = pcall(back.callRemote, name, method, ...)
       if ok then
         return true, result1, result2, result3, result4, result5
       end
+      remoteErr = result1
+      logThrottle(
+        "telemetry.safecall.remote.fail." .. tostring(name) .. "." .. tostring(method),
+        5000,
+        "WARN",
+        "TELEMETRY",
+        "safeCall modem remote failed",
+        {
+          device = tostring(name),
+          method = tostring(method),
+          error = tostring(remoteErr),
+        }
+      )
+    end
+
+    if localErr or remoteErr then
+      logThrottle(
+        "telemetry.safecall.fail." .. tostring(name) .. "." .. tostring(method),
+        5000,
+        "WARN",
+        "TELEMETRY",
+        "safeCall failed on all backends",
+        {
+          device = tostring(name),
+          method = tostring(method),
+          localError = tostring(localErr or "n/a"),
+          remoteError = tostring(remoteErr or "n/a"),
+        }
+      )
     end
 
     return false, nil
@@ -161,6 +275,16 @@ function M.create(args)
   local function readReaderData(name)
     local ok, data = safeCall(name, "getBlockData")
     if not ok or type(data) ~= "table" then
+      logThrottle(
+        "telemetry.reader.unavailable." .. tostring(name),
+        10000,
+        "WARN",
+        "TELEMETRY",
+        "reader unavailable",
+        {
+          reader = tostring(name),
+        }
+      )
       return {
         ok = false,
         present = devicePresent(name),
@@ -521,6 +645,50 @@ function M.create(args)
 
     data.alerts, data.alertList = buildAlerts(data)
     data.status, data.stateText = resolveStatus(data)
+
+    local presenceKey = table.concat({
+      tostring(logicPresent and "1" or "0"),
+      tostring(inductionPresent and "1" or "0"),
+      tostring(amplifierPresent and "1" or "0"),
+      tostring(laserPresent and "1" or "0"),
+    }, "|")
+    if presenceKey ~= lastPresenceKey then
+      logWithLevel("INFO", "TELEMETRY", "device presence changed", {
+        logic = logicPresent,
+        induction = inductionPresent,
+        amplifier = amplifierPresent,
+        laser = laserPresent,
+      })
+      lastPresenceKey = presenceKey
+    end
+
+    local snapshotKey = table.concat({
+      tostring(data.status),
+      tostring(data.alerts),
+      tostring(data.formed and "1" or "0"),
+      tostring(data.ignited and "1" or "0"),
+      tostring(data.laserReady and "1" or "0"),
+      tostring(math.floor((data.caseMK or 0) * 10 + 0.5) / 10),
+      tostring(math.floor((data.plasmaMK or 0) * 10 + 0.5) / 10),
+      tostring(math.floor((data.energyPct or 0) + 0.5)),
+      tostring(math.floor((data.dtPct or 0) + 0.5)),
+    }, "|")
+    if snapshotKey ~= lastTelemetrySnapshotKey or (now - lastTelemetrySnapshotAt) >= telemetrySnapshotMs then
+      logWithLevel("INFO", "TELEMETRY", "snapshot", {
+        status = data.status,
+        alerts = data.alerts,
+        formed = data.formed,
+        ignited = data.ignited,
+        laserReady = data.laserReady,
+        logicMode = data.logicMode,
+        caseMK = round(data.caseMK or 0, 1),
+        plasmaMK = round(data.plasmaMK or 0, 1),
+        energyPct = round(data.energyPct or 0, 1),
+        dtPct = round(data.dtPct or 0, 1),
+      })
+      lastTelemetrySnapshotKey = snapshotKey
+      lastTelemetrySnapshotAt = now
+    end
 
     state.live.cache = data
     state.live.lastPoll = now

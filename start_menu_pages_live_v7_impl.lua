@@ -61,6 +61,16 @@ local DEFAULTS = {
     overviewSource = "terrain",
     overviewScenario = "offline",
   },
+  logging = {
+    level = "INFO",
+    files = {
+      runtime = "ui_runtime.log",
+      update = "update.log",
+      rescue = "/rescue_update.log",
+    },
+    telemetrySnapshotSeconds = 10,
+    loopEventDebug = false,
+  },
 }
 
 local function deepCopy(value)
@@ -97,6 +107,14 @@ local function normalizeIntegrityMode(value)
     return "size-only"
   end
   return "size+hash"
+end
+
+local function normalizeLogLevel(value)
+  local raw = string.upper(nonEmptyString(value) or "INFO")
+  if raw == "DEBUG" or raw == "INFO" or raw == "WARN" or raw == "ERROR" then
+    return raw
+  end
+  return "INFO"
 end
 
 local OverviewValidation = assert(dofile("core/runtime/overview_validation.lua"))
@@ -142,11 +160,12 @@ local DEVICES = deepCopy(DEFAULTS.devices)
 local CONTROL = deepCopy(DEFAULTS.control)
 local UPDATE_CFG = deepCopy(DEFAULTS.update)
 local VALIDATION_CFG = deepCopy(DEFAULTS.validation)
+local LOGGING_CFG = deepCopy(DEFAULTS.logging)
 local START_PAGE = DEFAULTS.ui.startPage
 local UPDATE_VERSION_FILE = "fusion.version"
 local UPDATE_MANIFEST_FILE = "fusion.manifest.json"
-local UPDATE_LOG_FILE = "update.log"
-local UI_RUNTIME_LOG_FILE = "ui_runtime.log"
+local UPDATE_LOG_FILE = LOGGING_CFG.files.update
+local UI_RUNTIME_LOG_FILE = LOGGING_CFG.files.runtime
 local UPDATE_TEMP_DIR = "update_tmp"
 local UPDATE_BACKUP_DIR = "backup_last"
 
@@ -192,6 +211,7 @@ local ActionRuntime = assert(dofile("core/runtime/action_runtime.lua"))
 local AppBootstrap = assert(dofile("core/app/bootstrap.lua"))
 local AppRouter = assert(dofile("core/app/router.lua"))
 local AppMainLoop = assert(dofile("core/app/main_loop.lua"))
+local LoggerModule = assert(dofile("core/logging/logger.lua"))
 
 -- === External config loader ===
 local function loadExternalConfig()
@@ -267,6 +287,29 @@ local function loadExternalConfig()
     end
   end
 
+  if type(cfg.logging) == "table" then
+    if cfg.logging.level ~= nil then
+      LOGGING_CFG.level = normalizeLogLevel(cfg.logging.level)
+    end
+    if type(cfg.logging.telemetrySnapshotSeconds) == "number" then
+      LOGGING_CFG.telemetrySnapshotSeconds = math.max(1, math.floor(cfg.logging.telemetrySnapshotSeconds))
+    end
+    if type(cfg.logging.loopEventDebug) == "boolean" then
+      LOGGING_CFG.loopEventDebug = cfg.logging.loopEventDebug
+    end
+    if type(cfg.logging.files) == "table" then
+      if nonEmptyString(cfg.logging.files.runtime) then
+        LOGGING_CFG.files.runtime = cfg.logging.files.runtime
+      end
+      if nonEmptyString(cfg.logging.files.update) then
+        LOGGING_CFG.files.update = cfg.logging.files.update
+      end
+      if nonEmptyString(cfg.logging.files.rescue) then
+        LOGGING_CFG.files.rescue = cfg.logging.files.rescue
+      end
+    end
+  end
+
   if type(cfg.devices) == "table" then
     for k, v in pairs(cfg.devices) do
       if k == "gpu" and DEVICES.gpu ~= nil then
@@ -299,22 +342,68 @@ loadExternalConfig()
 UPDATE_CFG.integrityMode = normalizeIntegrityMode(UPDATE_CFG.integrityMode)
 VALIDATION_CFG.overviewSource = normalizeOverviewValidationSource(VALIDATION_CFG.overviewSource)
 VALIDATION_CFG.overviewScenario = normalizeOverviewValidationScenario(VALIDATION_CFG.overviewScenario)
+LOGGING_CFG.level = normalizeLogLevel(LOGGING_CFG.level)
+UPDATE_LOG_FILE = nonEmptyString(LOGGING_CFG.files.update) or UPDATE_LOG_FILE
+UI_RUNTIME_LOG_FILE = nonEmptyString(LOGGING_CFG.files.runtime) or UI_RUNTIME_LOG_FILE
+
+local appLogger = LoggerModule.create({
+  level = LOGGING_CFG.level,
+  defaultSink = "runtime",
+  files = {
+    runtime = UI_RUNTIME_LOG_FILE,
+    update = UPDATE_LOG_FILE,
+    rescue = nonEmptyString(LOGGING_CFG.files.rescue) or DEFAULTS.logging.files.rescue,
+  },
+})
+
+local function logWithLevel(level, category, message, context, sink)
+  if not appLogger then
+    return false
+  end
+
+  local method = string.lower(tostring(level or "INFO"))
+  local fn = appLogger[method]
+  if type(fn) == "function" then
+    return fn(category, message, context, sink or "runtime")
+  end
+
+  return appLogger.info(category, message, context, sink or "runtime")
+end
 
 local function initGpuFromConfig()
   local configuredGpuName = resolveConfiguredGpuName(DEVICES.gpu)
+  logWithLevel("INFO", "BOOT", "gpu init attempt", {
+    configured = tostring(configuredGpuName),
+    fallback = tostring(DEFAULTS.devices.gpu),
+  })
   local wrapped = peripheral.wrap(configuredGpuName)
   if wrapped then
+    logWithLevel("INFO", "BOOT", "gpu init success", {
+      device = tostring(configuredGpuName),
+      mode = tostring(GPU_MODE),
+    })
     return wrapped, configuredGpuName
   end
 
   local fallbackGpuName = DEFAULTS.devices.gpu
   if configuredGpuName ~= fallbackGpuName then
+    logWithLevel("WARN", "BOOT", "gpu init fallback attempt", {
+      configured = tostring(configuredGpuName),
+      fallback = tostring(fallbackGpuName),
+    })
     wrapped = peripheral.wrap(fallbackGpuName)
     if wrapped then
+      logWithLevel("INFO", "BOOT", "gpu init fallback success", {
+        device = tostring(fallbackGpuName),
+      })
       return wrapped, fallbackGpuName
     end
   end
 
+  logWithLevel("ERROR", "BOOT", "gpu init failed", {
+    configured = tostring(configuredGpuName),
+    fallback = tostring(fallbackGpuName),
+  })
   error("GPU introuvable: " .. tostring(configuredGpuName))
 end
 
@@ -509,12 +598,88 @@ local function runtimeNowText()
   return tostring(math.floor((os.clock() or 0) * 1000))
 end
 
-local function appendUiRuntimeLog(message)
-  local entry = "[" .. runtimeNowText() .. "] " .. tostring(message or "event")
-  local fh = fs.open(UI_RUNTIME_LOG_FILE, "a")
-  if fh then
-    fh.writeLine(entry)
-    fh.close()
+local function inferRuntimeLogCategory(messageText)
+  local lower = string.lower(tostring(messageText or ""))
+  if string.find(lower, "overview", 1, true) ~= nil
+    or string.find(lower, "callout", 1, true) ~= nil
+    or string.find(lower, "annotation", 1, true) ~= nil then
+    return "OVERVIEW"
+  end
+  if string.find(lower, "asset", 1, true) ~= nil
+    or string.find(lower, "variant", 1, true) ~= nil
+    or string.find(lower, "scene", 1, true) ~= nil then
+    return "ASSETS"
+  end
+  if string.find(lower, "effect", 1, true) ~= nil
+    or string.find(lower, "degradation", 1, true) ~= nil
+    or string.find(lower, "animation", 1, true) ~= nil
+    or string.find(lower, "flux", 1, true) ~= nil then
+    return "ANIMATIONS"
+  end
+  if string.find(lower, "clamp", 1, true) ~= nil
+    or string.find(lower, "clipped", 1, true) ~= nil
+    or string.find(lower, "boundary", 1, true) ~= nil
+    or string.find(lower, "gpu", 1, true) ~= nil then
+    return "GPU"
+  end
+  if string.find(lower, "resize", 1, true) ~= nil
+    or string.find(lower, "screen size", 1, true) ~= nil then
+    return "INPUT"
+  end
+  return "BOOT"
+end
+
+local function inferRuntimeLogLevel(messageText)
+  local lower = string.lower(tostring(messageText or ""))
+  if string.find(lower, " failed", 1, true) ~= nil
+    or string.find(lower, "error", 1, true) ~= nil
+    or string.find(lower, "out of", 1, true) ~= nil then
+    return "ERROR"
+  end
+  if string.find(lower, "warn", 1, true) ~= nil
+    or string.find(lower, "fallback", 1, true) ~= nil
+    or string.find(lower, "clamped", 1, true) ~= nil then
+    return "WARN"
+  end
+  return "INFO"
+end
+
+local function appendUiRuntimeLog(message, options)
+  local messageText = message
+  local context = nil
+  local level = nil
+  local category = nil
+
+  if type(message) == "table" then
+    messageText = message.message or message.text or message.msg or "event"
+    context = type(message.context) == "table" and message.context or nil
+    level = message.level
+    category = message.category
+  end
+  if type(options) == "table" then
+    if type(options.context) == "table" then
+      context = options.context
+    end
+    if options.level ~= nil then
+      level = options.level
+    end
+    if options.category ~= nil then
+      category = options.category
+    end
+  end
+
+  local finalMessage = tostring(messageText or "event")
+  local finalCategory = tostring(category or inferRuntimeLogCategory(finalMessage))
+  local finalLevel = normalizeLogLevel(level or inferRuntimeLogLevel(finalMessage))
+
+  local ok = logWithLevel(finalLevel, finalCategory, finalMessage, context, "runtime")
+  if not ok then
+    local entry = "[" .. runtimeNowText() .. "] [" .. finalLevel .. "] [" .. finalCategory .. "] " .. finalMessage
+    local fh = fs.open(UI_RUNTIME_LOG_FILE, "a")
+    if fh then
+      fh.writeLine(entry)
+      fh.close()
+    end
   end
 end
 
@@ -1667,7 +1832,7 @@ end
 
 local function drawText(x, y, text, color, size)
   return GpuSafe.drawText(
-    { gpu = gpu, ui = ui },
+    { gpu = gpu, ui = ui, logger = appLogger, logCategory = "GPU" },
     x,
     y,
     text,
@@ -1680,7 +1845,7 @@ end
 
 local function drawTextRight(xRight, y, text, color, size)
   return GpuSafe.drawTextRight(
-    { gpu = gpu, ui = ui },
+    { gpu = gpu, ui = ui, logger = appLogger, logCategory = "GPU" },
     xRight,
     y,
     text,
@@ -1697,7 +1862,7 @@ local function drawTextCenter(x, y, w, text, color, size)
   end
 
   return GpuSafe.drawTextCenter(
-    { gpu = gpu, ui = ui },
+    { gpu = gpu, ui = ui, logger = appLogger, logCategory = "GPU" },
     x,
     y,
     w,
@@ -1888,6 +2053,8 @@ local telemetryRuntime = TelemetryRuntime.create({
   colors = C,
   clamp = clamp,
   round = round,
+  logger = appLogger,
+  logging = LOGGING_CFG,
 })
 
 local function safeCall(name, method, ...)
@@ -1910,6 +2077,7 @@ local actionRuntime = ActionRuntime.create({
   safeCall = safeCall,
   firstLine = firstLine,
   clamp = clamp,
+  logger = appLogger,
 })
 
 local function relaySideConfigured(key)
@@ -1930,6 +2098,10 @@ end
 
 local function processPendingTimer(timerId)
   return actionRuntime.processPendingTimer(timerId)
+end
+
+local function classifyRuntimeAction(action)
+  return actionRuntime.classifyAction(action)
 end
 
 local function getDataSummary(data)
@@ -1992,12 +2164,32 @@ local function loadUpdateLogTail(maxLines)
   end
 end
 
+local function inferUpdateLogLevel(messageText)
+  local lower = string.lower(tostring(messageText or ""))
+  if string.find(lower, " failed", 1, true) ~= nil
+    or string.find(lower, "error", 1, true) ~= nil
+    or string.find(lower, "mismatch", 1, true) ~= nil then
+    return "ERROR"
+  end
+  if string.find(lower, "warning", 1, true) ~= nil
+    or string.find(lower, "skipped", 1, true) ~= nil
+    or string.find(lower, "rollback", 1, true) ~= nil then
+    return "WARN"
+  end
+  return "INFO"
+end
+
 local function appendUpdateLogLine(message)
-  local entry = "[" .. nowText() .. "] " .. tostring(message or "event")
-  local fh = fs.open(UPDATE_LOG_FILE, "a")
-  if fh then
-    fh.writeLine(entry)
-    fh.close()
+  local text = tostring(message or "event")
+  local level = inferUpdateLogLevel(text)
+  local ok = logWithLevel(level, "UPDATE", text, nil, "update")
+  if not ok then
+    local entry = "[" .. nowText() .. "] [" .. level .. "] [UPDATE] " .. text
+    local fh = fs.open(UPDATE_LOG_FILE, "a")
+    if fh then
+      fh.writeLine(entry)
+      fh.close()
+    end
   end
   loadUpdateLogTail(12)
 end
@@ -3260,6 +3452,7 @@ local function drawImageStack(slotX, slotY, slotW, slotH, data, forcedLayout, re
     drawTextCenter = drawTextCenter,
     textPixelHeight = textPixelHeight,
     appendUiRuntimeLog = appendUiRuntimeLog,
+    logger = appLogger,
     sceneMode = rendererSceneMode,
     reactorPresent = images.reactor ~= nil,
     laserPresent = images.laserModule ~= nil,
@@ -3478,11 +3671,31 @@ render = function()
   gpu.sync()
 end
 
+logWithLevel("INFO", "BOOT", "entrypoint configuration loaded", {
+  entrypoint = "start.lua",
+  implementation = "start_menu_pages_live_v7_impl.lua",
+  gpu = tostring(ACTIVE_GPU_NAME),
+  updateBranch = tostring(UPDATE_CFG.branch or "main"),
+  updateChannel = tostring(UPDATE_CFG.channel or "stable"),
+  validationSource = tostring(VALIDATION_CFG.overviewSource or "terrain"),
+  logLevel = tostring(LOGGING_CFG.level),
+  runtimeLog = tostring(UI_RUNTIME_LOG_FILE),
+  updateLog = tostring(UPDATE_LOG_FILE),
+})
+logWithLevel("INFO", "BOOT", "modules loaded", {
+  app = "core/app/bootstrap.lua,core/app/router.lua,core/app/main_loop.lua",
+  runtime = "core/runtime/telemetry_runtime.lua,core/runtime/action_runtime.lua",
+  overview = "ui/pages/overview_page.lua,ui/pages/overview_graphics.lua",
+})
+
 appWiring = AppBootstrap.buildWiring({
   state = state,
   updateCfg = UPDATE_CFG,
   refreshSeconds = REFRESH_SECONDS,
+  loopEventDebug = LOGGING_CFG.loopEventDebug,
+  logger = appLogger,
   pageExists = pageExists,
+  classifyRuntimeAction = classifyRuntimeAction,
   executeRuntimeCommand = actionRuntime.executeCommand,
   buildUI = buildUI,
   tryLoadAssets = tryLoadAssets,

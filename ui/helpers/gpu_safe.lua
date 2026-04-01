@@ -1,4 +1,72 @@
 local M = {}
+local throttleFallback = {}
+
+local function nowMs()
+  if os.epoch then
+    return os.epoch("utc")
+  end
+  return math.floor((os.clock() or 0) * 1000)
+end
+
+local function logWithLevel(logger, level, category, message, context, sink)
+  if not logger then
+    return false
+  end
+
+  local method = string.lower(tostring(level or "INFO"))
+  local fn = logger[method]
+  if type(fn) == "function" then
+    return fn(category, message, context, sink or "runtime")
+  end
+
+  if type(logger.info) == "function" then
+    return logger.info(category, message, context, sink or "runtime")
+  end
+
+  return false
+end
+
+local function throttleFallbackAllow(key, intervalMs)
+  local now = nowMs()
+  local previous = throttleFallback[key]
+  if previous and (now - previous) < intervalMs then
+    return false
+  end
+  throttleFallback[key] = now
+  return true
+end
+
+local function logGpu(args, level, message, context, key, intervalMs)
+  local category = tostring((args and args.logCategory) or "GPU")
+  local sink = tostring((args and args.logSink) or "runtime")
+  local logger = args and args.logger
+
+  if logger and key and type(logger.throttle) == "function" then
+    logger.throttle(key, intervalMs or 4000, level, category, message, context, sink)
+    return
+  end
+
+  if logger then
+    if key and not throttleFallbackAllow(key, intervalMs or 4000) then
+      return
+    end
+    logWithLevel(logger, level, category, message, context, sink)
+    return
+  end
+
+  local appendFallback = args and args.appendUiRuntimeLog
+  if type(appendFallback) == "function" then
+    if key and not throttleFallbackAllow(key, intervalMs or 4000) then
+      return
+    end
+    appendFallback({
+      category = category,
+      level = level,
+      message = message,
+      context = context,
+    })
+  end
+end
 
 local function resolveBounds(args, gpu)
   local g = gpu or (args and args.gpu)
@@ -183,10 +251,39 @@ function M.filledRect(args, x, y, w, h, color)
 
   local cx, cy, cw, ch = clipRect(x, y, w, h, sw, sh)
   if not cx then
+    logGpu(args, "DEBUG", "filledRect skipped (clipped)", {
+      x = math.floor(tonumber(x) or 0),
+      y = math.floor(tonumber(y) or 0),
+      w = math.floor(tonumber(w) or 0),
+      h = math.floor(tonumber(h) or 0),
+      sw = sw,
+      sh = sh,
+    }, "gpu.filledRect.clipped", 3000)
     return false, "clipped"
   end
 
+  if cx ~= x or cy ~= y or cw ~= w or ch ~= h then
+    logGpu(args, "DEBUG", "filledRect clamped", {
+      x = math.floor(tonumber(x) or 0),
+      y = math.floor(tonumber(y) or 0),
+      w = math.floor(tonumber(w) or 0),
+      h = math.floor(tonumber(h) or 0),
+      clamped = tostring(cx) .. "," .. tostring(cy) .. ":" .. tostring(cw) .. "x" .. tostring(ch),
+      sw = sw,
+      sh = sh,
+    }, "gpu.filledRect.clamped", 5000)
+  end
+
   local ok, err = pcall(gpu.filledRectangle, cx, cy, cw, ch, color)
+  if not ok then
+    logGpu(args, "WARN", "filledRect draw failed", {
+      error = tostring(err),
+      x = cx,
+      y = cy,
+      w = cw,
+      h = ch,
+    }, "gpu.filledRect.error", 2000)
+  end
   return ok, err
 end
 
@@ -228,6 +325,14 @@ function M.drawImage(args, img, x, y)
     x = math.floor(tonumber(x) or 0)
     y = math.floor(tonumber(y) or 0)
     if x < 0 or y < 0 or (x + iw) > sw or (y + ih) > sh then
+      logGpu(args, "WARN", "drawImage skipped (out of bounds)", {
+        x = x,
+        y = y,
+        w = iw,
+        h = ih,
+        sw = sw,
+        sh = sh,
+      }, "gpu.drawImage.out_of_bounds", 3000)
       return false, "image out of bounds"
     end
   end
@@ -235,6 +340,13 @@ function M.drawImage(args, img, x, y)
   local ok, err = pcall(function()
     gpu.drawImage(x, y, img.ref())
   end)
+  if not ok then
+    logGpu(args, "WARN", "drawImage failed", {
+      x = x,
+      y = y,
+      error = tostring(err),
+    }, "gpu.drawImage.error", 2000)
+  end
   return ok, err
 end
 
@@ -267,12 +379,23 @@ function M.drawText(args, x, y, text, color, bgColor, size, angle, options)
 
   local clip = resolveClip(sw, sh, options)
   if not clip then
+    logGpu(args, "DEBUG", "drawText skipped (clip out of bounds)", {
+      x = math.floor(tonumber(x) or 0),
+      y = math.floor(tonumber(y) or 0),
+      sw = sw,
+      sh = sh,
+    }, "gpu.drawText.clip_oob", 3000)
     return false, "clip out of bounds"
   end
 
   local drawY = math.floor(tonumber(y) or 0)
   local textH = math.max(1, 8 * drawSize)
   if textH > clip.h then
+    logGpu(args, "DEBUG", "drawText skipped (text too tall)", {
+      textH = textH,
+      clipH = clip.h,
+      clip = tostring(clip.x) .. "," .. tostring(clip.y) .. ":" .. tostring(clip.w) .. "x" .. tostring(clip.h),
+    }, "gpu.drawText.too_tall", 4000)
     return false, "text too tall for clip"
   end
 
@@ -283,11 +406,22 @@ function M.drawText(args, x, y, text, color, bgColor, size, angle, options)
     drawY = clip.bottom - textH + 1
   end
   if drawY < clip.y then
+    logGpu(args, "DEBUG", "drawText skipped (y outside clip)", {
+      requestedY = math.floor(tonumber(y) or 0),
+      finalY = drawY,
+      clipY = clip.y,
+      clipBottom = clip.bottom,
+    }, "gpu.drawText.y_oob", 4000)
     return false, "y outside clip"
   end
 
   drawText = fitTextToWidth(gpu, drawText, drawSize, drawAngle, clip.w)
   if drawText == "" then
+    logGpu(args, "DEBUG", "drawText skipped (outside clip width)", {
+      requestedText = tostring(text or ""),
+      clipW = clip.w,
+      size = drawSize,
+    }, "gpu.drawText.width_oob", 3000)
     return false, "text outside clip"
   end
 
@@ -305,10 +439,31 @@ function M.drawText(args, x, y, text, color, bgColor, size, angle, options)
   end
 
   if drawX < clip.x then
+    logGpu(args, "DEBUG", "drawText skipped (x outside clip)", {
+      requestedX = math.floor(tonumber(x) or 0),
+      finalX = drawX,
+      clipX = clip.x,
+      clipRight = clip.right,
+      text = drawText,
+    }, "gpu.drawText.x_oob", 4000)
     return false, "x outside clip"
   end
 
   local ok, err = pcall(gpu.drawText, drawX, drawY, drawText, color, bgColor, drawSize, drawAngle)
+  if not ok then
+    logGpu(args, "WARN", "drawText failed", {
+      x = drawX,
+      y = drawY,
+      text = drawText,
+      error = tostring(err),
+    }, "gpu.drawText.error", 2000)
+  elseif drawX ~= math.floor(tonumber(x) or 0) or drawY ~= math.floor(tonumber(y) or 0) then
+    logGpu(args, "DEBUG", "drawText clamped", {
+      requested = tostring(math.floor(tonumber(x) or 0)) .. "," .. tostring(math.floor(tonumber(y) or 0)),
+      final = tostring(drawX) .. "," .. tostring(drawY),
+      text = drawText,
+    }, "gpu.drawText.clamped", 5000)
+  end
   return ok, err
 end
 
