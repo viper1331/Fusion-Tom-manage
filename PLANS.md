@@ -9,7 +9,7 @@ Ce document cadre les prochaines itérations Codex sur le dépôt :
 Il complète `AGENTS.md` et fixe un plan d’exécution priorisé à partir de l’état intermédiaire actuel du projet.
 
 Version de référence observée :
-- `fusion.version` = `1.2.28`
+- `fusion.version` = `1.2.29`
 - point d’entrée standard = `start.lua`
 - shim legacy encore présent = `start_menu_pages_live_v7.lua`
 
