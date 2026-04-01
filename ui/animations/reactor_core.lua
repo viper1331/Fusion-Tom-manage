@@ -3,11 +3,11 @@ local GpuSafe = assert(dofile("ui/helpers/gpu_safe.lua"))
 
 local CALIBRATION = {
   centerXRatio = 0.438,
-  centerYRatio = 0.458,
-  compactScale = 0.82,
-  microScale = 0.68,
-  baseRadiusXRatio = 0.0098,
-  baseRadiusYRatio = 0.0140,
+  centerYRatio = 0.459,
+  compactScale = 0.80,
+  microScale = 0.64,
+  baseRadiusXRatio = 0.0090,
+  baseRadiusYRatio = 0.0128,
 }
 
 local function pulseWave(frame, period)
@@ -105,15 +105,15 @@ end
 
 local function buildStateStyle(data, stateName, frame)
   local style = {
-    outer = 0x18004A72,
-    mid = 0x284FCBFF,
-    inner = 0x44CFF6FF,
+    outer = 0x14004A72,
+    mid = 0x224FCBFF,
+    inner = 0x3CCFF6FF,
     core = 0xFFE7FBFF,
     spark = 0xFFB5F3FF,
-    sparkCount = 4,
+    sparkCount = 3,
     pulsePeriod = 18,
-    haloBoost = 1.00,
-    flicker = 0.10,
+    haloBoost = 0.95,
+    flicker = 0.08,
   }
 
   if stateName == "offline" then
@@ -128,14 +128,14 @@ local function buildStateStyle(data, stateName, frame)
     style.flicker = 0.02
   elseif stateName == "formed" then
     style.outer = 0x0E1A2345
-    style.mid = 0x16435E8A
-    style.inner = 0x2471A8D5
+    style.mid = 0x14435E8A
+    style.inner = 0x2271A8D5
     style.core = 0x886BBBEA
     style.spark = 0x6682D8FF
-    style.sparkCount = 2
+    style.sparkCount = 1
     style.pulsePeriod = 22
-    style.haloBoost = 0.60
-    style.flicker = 0.05
+    style.haloBoost = 0.56
+    style.flicker = 0.04
   elseif stateName == "ignition" then
     local ampPct = clamp01(tonumber(data and data.laserAmplifierPct) or 0)
     style.outer = 0x1C2A3A80
@@ -143,30 +143,30 @@ local function buildStateStyle(data, stateName, frame)
     style.inner = 0x5083D7FF
     style.core = 0xFFF6FDFF
     style.spark = 0xFFC8F4FF
-    style.sparkCount = 5
+    style.sparkCount = 4
     style.pulsePeriod = 12
-    style.haloBoost = 0.85 + (ampPct * 0.55)
-    style.flicker = 0.12 + (ampPct * 0.12)
+    style.haloBoost = 0.80 + (ampPct * 0.48)
+    style.flicker = 0.10 + (ampPct * 0.10)
   elseif stateName == "running" then
-    style.outer = 0x1A302F8E
-    style.mid = 0x2A568AE0
-    style.inner = 0x568ADFFF
+    style.outer = 0x162F2F8E
+    style.mid = 0x24568AE0
+    style.inner = 0x4E8ADFFF
     style.core = 0xFFFFFFFF
     style.spark = 0xFFCCF6FF
-    style.sparkCount = 5
+    style.sparkCount = 4
     style.pulsePeriod = 14
-    style.haloBoost = 1.00
-    style.flicker = 0.14
+    style.haloBoost = 0.96
+    style.flicker = 0.12
   elseif stateName == "high_load" then
-    style.outer = 0x224040AA
-    style.mid = 0x344E84F0
-    style.inner = 0x5E87E7FF
+    style.outer = 0x1E4040AA
+    style.mid = 0x2E4E84F0
+    style.inner = 0x5687E7FF
     style.core = 0xFFFFFFFF
     style.spark = 0xFFFFFFFF
-    style.sparkCount = 7
+    style.sparkCount = 6
     style.pulsePeriod = 10
-    style.haloBoost = 1.28
-    style.flicker = 0.18
+    style.haloBoost = 1.18
+    style.flicker = 0.15
   elseif stateName == "warning" then
     local unstable = ((frame * 13) % 9) / 9
     style.outer = 0x244A2A98
@@ -174,10 +174,10 @@ local function buildStateStyle(data, stateName, frame)
     style.inner = 0x5A9FE8FF
     style.core = 0xFFF5FDFF
     style.spark = 0xFFE2F8FF
-    style.sparkCount = 6
+    style.sparkCount = 5
     style.pulsePeriod = 9
-    style.haloBoost = 1.08 + (unstable * 0.30)
-    style.flicker = 0.22
+    style.haloBoost = 1.02 + (unstable * 0.24)
+    style.flicker = 0.18
   elseif stateName == "scram" then
     local decay = 1 - (((frame * 3) % 16) / 16)
     style.outer = 0x120A1228
@@ -185,10 +185,10 @@ local function buildStateStyle(data, stateName, frame)
     style.inner = 0x223E699A
     style.core = 0x883E8AC2
     style.spark = 0x553A86B6
-    style.sparkCount = 2
+    style.sparkCount = 1
     style.pulsePeriod = 7
-    style.haloBoost = 0.32 + (decay * 0.38)
-    style.flicker = 0.08
+    style.haloBoost = 0.30 + (decay * 0.34)
+    style.flicker = 0.06
   end
 
   return style
@@ -229,21 +229,21 @@ function M.draw(args, x, y, w, h, data)
   local baseRadiusY = math.max(3, math.floor(h * CALIBRATION.baseRadiusYRatio * scale))
   local pulse = pulseWave(frame + 3, style.pulsePeriod)
   local drift = (((frame * 11) % 17) / 17) * style.flicker
-  local haloFactor = (0.90 + (pulse * 0.18) + drift) * style.haloBoost
+  local haloFactor = (0.88 + (pulse * 0.16) + drift) * style.haloBoost
 
-  local outerRx = math.max(3, math.floor(baseRadiusX * 2.30 * haloFactor))
-  local outerRy = math.max(4, math.floor(baseRadiusY * 2.35 * haloFactor))
-  local midRx = math.max(2, math.floor(baseRadiusX * 1.65 * haloFactor))
-  local midRy = math.max(3, math.floor(baseRadiusY * 1.70 * haloFactor))
-  local innerRx = math.max(2, math.floor(baseRadiusX * 1.20 * haloFactor))
-  local innerRy = math.max(2, math.floor(baseRadiusY * 1.25 * haloFactor))
+  local outerRx = math.max(3, math.floor(baseRadiusX * 2.15 * haloFactor))
+  local outerRy = math.max(4, math.floor(baseRadiusY * 2.20 * haloFactor))
+  local midRx = math.max(2, math.floor(baseRadiusX * 1.55 * haloFactor))
+  local midRy = math.max(3, math.floor(baseRadiusY * 1.60 * haloFactor))
+  local innerRx = math.max(2, math.floor(baseRadiusX * 1.14 * haloFactor))
+  local innerRy = math.max(2, math.floor(baseRadiusY * 1.18 * haloFactor))
 
   drawSoftEllipse(args, cx, cy, outerRx, outerRy, style.outer)
   drawSoftEllipse(args, cx, cy, midRx, midRy, style.mid)
   drawSoftEllipse(args, cx, cy, innerRx, innerRy, style.inner)
 
-  local coreRx = math.max(1, math.floor(innerRx * (ui.micro and 0.42 or 0.48)))
-  local coreRy = math.max(1, math.floor(innerRy * (ui.micro and 0.45 or 0.52)))
+  local coreRx = math.max(1, math.floor(innerRx * (ui.micro and 0.40 or 0.46)))
+  local coreRy = math.max(1, math.floor(innerRy * (ui.micro and 0.42 or 0.50)))
   drawSoftEllipse(args, cx, cy, coreRx, coreRy, style.core)
   drawSoftEllipse(args, cx, cy - 1, math.max(1, coreRx - 1), math.max(1, coreRy - 1), 0xAAFFFFFF)
 

@@ -3,35 +3,35 @@ local GpuSafe = assert(dofile("ui/helpers/gpu_safe.lua"))
 
 local CALIBRATION = {
   module = {
-    yRatio = 0.500,
-    thicknessRatio = 0.110,
+    yRatio = 0.502,
+    thicknessRatio = 0.088,
     leftOuterRatio = 0.095,
     leftInnerRatio = 0.295,
     rightInnerRatio = 0.695,
     rightOuterRatio = 0.900,
   },
   reactorRight = {
-    yRatio = 0.513,
-    thicknessRatio = 0.014,
-    startXRatio = 0.752,
-    endXRatio = 0.913,
-    particleScale = 0.78,
-    particleHeightScale = 0.85,
+    yRatio = 0.511,
+    thicknessRatio = 0.012,
+    startXRatio = 0.754,
+    endXRatio = 0.910,
+    particleScale = 0.70,
+    particleHeightScale = 0.78,
   },
   bottom = {
-    topYRatio = 0.822,
-    bottomYRatio = 0.952,
-    thicknessRatio = 0.0075,
-    axisGlow = 0x15000000,
+    topYRatio = 0.826,
+    bottomYRatio = 0.949,
+    thicknessRatio = 0.0062,
+    axisGlow = 0x0C000000,
     particleW = 1,
-    particleH = 2,
+    particleH = 1,
     trailSteps = 1,
     channels = {
       -- Required left -> right order from field calibration:
       -- tritium (green), DT-Fuel (violet), deuterium (red)
-      { ratio = 0.334, key = "tritium", color = 0xFF4DE06D, glow = 0x164DE06D, trail = 0x554DE06D, speed = 6, count = 2 },
-      { ratio = 0.452, key = "dtFuel", color = 0xFFB26BFF, glow = 0x16B26BFF, trail = 0x55B26BFF, speed = 5, count = 2 },
-      { ratio = 0.567, key = "deuterium", color = 0xFFFF5A5A, glow = 0x16FF5A5A, trail = 0x55FF5A5A, speed = 6, count = 2 },
+      { ratio = 0.334, key = "tritium", color = 0xFF4DE06D, glow = 0x124DE06D, trail = 0x444DE06D, speed = 6, count = 2 },
+      { ratio = 0.452, key = "dtFuel", color = 0xFFB26BFF, glow = 0x12B26BFF, trail = 0x44B26BFF, speed = 5, count = 2 },
+      { ratio = 0.567, key = "deuterium", color = 0xFFFF5A5A, glow = 0x12FF5A5A, trail = 0x44FF5A5A, speed = 6, count = 2 },
     },
   },
 }
@@ -141,47 +141,47 @@ end
 
 local function getFlowStyle(mode)
   local style = {
-    baseGlow = 0x12006892,
+    baseGlow = 0x0E006892,
     particle = 0xFF6EDFFF,
-    trail = 0x665BCFFF,
-    marker = 0x667CD9FF,
+    trail = 0x4A5BCFFF,
+    marker = 0x4A7CD9FF,
     speed = 10,
     count = 2,
   }
 
   if mode == "standby" then
-    style.baseGlow = 0x10005070
+    style.baseGlow = 0x0C005070
     style.particle = 0xAA58BFE8
-    style.trail = 0x4450A4CC
-    style.marker = 0x3358B5E0
+    style.trail = 0x3450A4CC
+    style.marker = 0x2858B5E0
     style.speed = 8
     style.count = 1
   elseif mode == "charging" then
-    style.baseGlow = 0x1A00A0D8
+    style.baseGlow = 0x1500A0D8
     style.particle = 0xFF7CEAFF
-    style.trail = 0x6674DFFF
-    style.marker = 0x6687EDFF
+    style.trail = 0x4F74DFFF
+    style.marker = 0x5287EDFF
     style.speed = 14
     style.count = 3
   elseif mode == "ready" then
-    style.baseGlow = 0x1840D8FF
+    style.baseGlow = 0x1440D8FF
     style.particle = 0xFFE7FBFF
-    style.trail = 0x66A8EEFF
-    style.marker = 0x88C6F4FF
+    style.trail = 0x50A8EEFF
+    style.marker = 0x66C6F4FF
     style.speed = 16
     style.count = 2
   elseif mode == "firing" then
-    style.baseGlow = 0x28D5F5FF
+    style.baseGlow = 0x22D5F5FF
     style.particle = 0xFFFFFFFF
-    style.trail = 0x88D8F6FF
-    style.marker = 0xAAFFFFFF
+    style.trail = 0x68D8F6FF
+    style.marker = 0x90FFFFFF
     style.speed = 22
     style.count = 4
   elseif mode == "running" then
-    style.baseGlow = 0x1200709F
+    style.baseGlow = 0x0F00709F
     style.particle = 0xFF76D8F5
-    style.trail = 0x5579C9E8
-    style.marker = 0x4477C7E2
+    style.trail = 0x4379C9E8
+    style.marker = 0x3377C7E2
     style.speed = 11
     style.count = 2
   end
@@ -213,11 +213,11 @@ local function drawHorizontalParticleFlow(args, spec)
   safeFilledRect(args, x1, y - math.floor(thickness / 2), lineW, thickness, style.baseGlow)
 
   local travel = math.max(4, x2 - x1)
-  local packetScale = spec.particleScale or (args.ui and args.ui.micro and 0.75 or 0.95)
-  local packetHeightScale = spec.particleHeightScale or 1.00
+  local packetScale = spec.particleScale or (args.ui and args.ui.micro and 0.68 or (args.ui and args.ui.compact and 0.74 or 0.80))
+  local packetHeightScale = spec.particleHeightScale or 0.86
   local packetW = math.max(1, math.floor(thickness * packetScale))
   local packetH = math.max(1, math.floor(thickness * packetHeightScale))
-  local trailSteps = (args.ui and args.ui.micro) and 1 or 2
+  local trailSteps = (args.ui and (args.ui.micro or args.ui.compact)) and 1 or 2
   local trailStep = math.max(1, math.floor(packetW * 0.90))
   local speed = math.max(1, math.floor(style.speed * intensity))
   local count = math.max(1, math.floor(style.count * density + 0.5))
@@ -321,7 +321,7 @@ function M.drawModuleFlux(args, x, y, w, h, data)
   end
 
   local cableY = y + math.floor(h * CALIBRATION.module.yRatio)
-  local thickness = math.max(2, math.floor(h * CALIBRATION.module.thicknessRatio))
+  local thickness = math.max(1, math.floor(h * CALIBRATION.module.thicknessRatio))
   local intensity = resolveFlowIntensity(data, mode)
 
   local leftOuter = x + math.floor(w * CALIBRATION.module.leftOuterRatio)

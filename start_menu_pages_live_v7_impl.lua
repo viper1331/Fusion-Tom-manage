@@ -791,6 +791,34 @@ local function isTierPairCompatible(reactorTier, moduleTier)
   return math.abs(reactorIndex - moduleIndex) <= 2
 end
 
+local function resolveOverviewStackSpacing()
+  local smallPad = ui and ui.smallPad or 0
+  local moduleGapMul = 0.48
+  local reactorGapMul = 1.65
+  local stackOffsetY = 0
+
+  if ui and ui.compact then
+    moduleGapMul = 0.44
+    reactorGapMul = 1.50
+    stackOffsetY = 1
+  end
+
+  if ui and ui.micro then
+    moduleGapMul = 0.40
+    reactorGapMul = 1.25
+    stackOffsetY = 0
+  end
+
+  local moduleGap = math.max(1, math.floor(smallPad * moduleGapMul))
+  local reactorGap = math.max(2, math.floor(smallPad * reactorGapMul))
+
+  return {
+    moduleGap = moduleGap,
+    reactorGap = reactorGap,
+    stackOffsetY = stackOffsetY,
+  }
+end
+
 local function reactorFitsViewport(reactorVariant, viewportW, viewportH)
   if not reactorVariant then
     return false
@@ -806,14 +834,14 @@ local function pairFitsViewport(reactorVariant, moduleVariant, viewportW, viewpo
     return false, 0, 0
   end
 
-  local gap = ui and ui.smallPad or 0
-  local moduleGap = math.max(1, math.floor((ui and ui.smallPad or 0) * 0.45))
+  local spacing = resolveOverviewStackSpacing()
+  local gap = spacing.reactorGap
   local requiredW = reactorVariant.width
   local requiredH = reactorVariant.height
 
   if moduleVariant then
     requiredW = math.max(requiredW, moduleVariant.width)
-    requiredH = requiredH + gap + moduleVariant.height + moduleGap * 0
+    requiredH = requiredH + gap + moduleVariant.height
   end
 
   if not viewportW or not viewportH then
@@ -1266,8 +1294,9 @@ local lastLayoutFallbackLogKey = nil
 local lastLayoutFallbackRejectLogKey = nil
 
 local function chooseStackLayout(slotW, slotH, moduleCount)
-  local gap = ui and ui.smallPad or 0
-  local moduleGap = math.max(1, math.floor(gap * 0.45))
+  local spacing = resolveOverviewStackSpacing()
+  local gap = spacing.reactorGap
+  local moduleGap = spacing.moduleGap
   local best = nil
 
   local reactors = #images.reactorVariants > 0 and images.reactorVariants or {}
@@ -1301,6 +1330,8 @@ local function chooseStackLayout(slotW, slotH, moduleCount)
         requiredW = reactorRequiredW,
         requiredH = reactorRequiredH,
         moduleGap = moduleGap,
+        reactorGap = gap,
+        stackOffsetY = spacing.stackOffsetY,
       }
     end
 
@@ -1321,6 +1352,8 @@ local function chooseStackLayout(slotW, slotH, moduleCount)
             requiredH = requiredH,
             modulesBlockH = modulesBlockH,
             moduleGap = moduleGap,
+            reactorGap = gap,
+            stackOffsetY = spacing.stackOffsetY,
           }
         end
       end
@@ -1360,6 +1393,8 @@ local function chooseStackLayout(slotW, slotH, moduleCount)
       requiredW = fallbackReactor.width,
       requiredH = fallbackReactor.height,
       moduleGap = moduleGap,
+      reactorGap = gap,
+      stackOffsetY = spacing.stackOffsetY,
     }
   elseif fallbackReactor then
     local rejectLogKey = table.concat({

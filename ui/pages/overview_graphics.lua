@@ -4,6 +4,36 @@ local ElectricFlowAnimation = assert(dofile("ui/animations/electric_flow.lua"))
 local ReactorCoreAnimation = assert(dofile("ui/animations/reactor_core.lua"))
 local GpuSafe = assert(dofile("ui/helpers/gpu_safe.lua"))
 local renderLogKeys = {}
+local STACK_CALIBRATION = {
+  large = { moduleGapMul = 0.48, reactorGapMul = 1.65, stackOffsetY = 0 },
+  compact = { moduleGapMul = 0.44, reactorGapMul = 1.50, stackOffsetY = 1 },
+  micro = { moduleGapMul = 0.40, reactorGapMul = 1.25, stackOffsetY = 0 },
+}
+
+local function resolveStackCalibration(ui, state)
+  local profile = STACK_CALIBRATION.large
+  if ui and ui.micro then
+    profile = STACK_CALIBRATION.micro
+  elseif ui and ui.compact then
+    profile = STACK_CALIBRATION.compact
+  end
+
+  local smallPad = ui and ui.smallPad or 0
+  local moduleGap = math.max(1, math.floor(smallPad * profile.moduleGapMul))
+  local reactorGap = math.max(2, math.floor(smallPad * profile.reactorGapMul))
+  local stackOffsetY = profile.stackOffsetY or 0
+
+  local visual = state and state.visual
+  if visual and visual.effectLevel == "minimal" then
+    moduleGap = math.max(1, moduleGap - 1)
+  end
+
+  return {
+    moduleGap = moduleGap,
+    reactorGap = reactorGap,
+    stackOffsetY = stackOffsetY,
+  }
+end
 
 local function appendRuntimeLog(args, message)
   local logger = args and args.appendUiRuntimeLog
@@ -64,6 +94,7 @@ function M.drawImageStack(args)
   local laserAssetName = tostring(args.laserAssetName or "none")
   local fallbackReactorVariant = args.fallbackReactorVariant
   local fallbackLaserVariant = args.fallbackLaserVariant
+  local stackCalibration = resolveStackCalibration(ui, args.state)
   if (not reactorPresent) and fallbackReactorVariant then
     reactorPresent = true
   end
@@ -94,7 +125,9 @@ function M.drawImageStack(args)
       moduleCount = 0,
       configuredModuleCount = configuredModuleCount,
       drawnModuleCount = 0,
-      moduleGap = math.max(1, math.floor(ui.smallPad * 0.45)),
+      moduleGap = stackCalibration.moduleGap,
+      reactorGap = stackCalibration.reactorGap,
+      stackOffsetY = stackCalibration.stackOffsetY,
     }
     local fallbackLayoutKey = table.concat({
       tostring(slotW),
@@ -185,16 +218,24 @@ function M.drawImageStack(args)
     end
   end
 
-  local moduleGap = layout.moduleGap or math.max(1, math.floor(ui.smallPad * 0.45))
-  local gap = ui.smallPad
+  local moduleGap = layout.moduleGap or stackCalibration.moduleGap
+  local reactorGap = layout.reactorGap or stackCalibration.reactorGap
+  local stackOffsetY = layout.stackOffsetY or stackCalibration.stackOffsetY
   local modulesBlockH = 0
 
   if moduleVariant and drawnModuleCount > 0 then
     modulesBlockH = (moduleVariant.height * drawnModuleCount) + (moduleGap * math.max(0, drawnModuleCount - 1))
   end
 
-  local totalH = reactorVariant.height + ((moduleVariant and drawnModuleCount > 0) and (gap + modulesBlockH) or 0)
-  local startY = slotY + math.floor((slotH - totalH) / 2)
+  local totalH = reactorVariant.height + ((moduleVariant and drawnModuleCount > 0) and (reactorGap + modulesBlockH) or 0)
+  local startY = slotY + math.floor((slotH - totalH) / 2) + stackOffsetY
+  local minStartY = slotY
+  local maxStartY = slotY + math.max(0, slotH - totalH)
+  if startY < minStartY then
+    startY = minStartY
+  elseif startY > maxStartY then
+    startY = maxStartY
+  end
 
   if moduleVariant and drawnModuleCount > 0 then
     for i = 1, drawnModuleCount do
@@ -203,11 +244,11 @@ function M.drawImageStack(args)
       drawImageSafe(args, moduleVariant.image, moduleX, moduleY)
       drawModuleCableFluxAt(args, moduleX, moduleY, moduleVariant.width, moduleVariant.height, data)
     end
-    startY = startY + modulesBlockH + gap
+    startY = startY + modulesBlockH + reactorGap
   else
     local moduleTextY = startY + math.max(0, math.floor((ui.smallPad + textPixelHeight(1)) / 2))
     drawTextCenter(slotX, moduleTextY, slotW, "LASER x" .. tostring(configuredCount), C.muted, 1)
-    startY = startY + ui.smallPad + textPixelHeight(1) + ui.smallPad
+    startY = startY + math.max(ui.smallPad, reactorGap - 1) + textPixelHeight(1) + ui.smallPad
   end
 
   local reactorX = slotX + math.floor((slotW - reactorVariant.width) / 2)
@@ -223,6 +264,9 @@ function M.drawImageStack(args)
     tostring(moduleVariant and moduleVariant.name or "none"),
     tostring(reactorVariant and reactorVariant.width or "n/a"),
     tostring(reactorVariant and reactorVariant.height or "n/a"),
+    tostring(moduleGap),
+    tostring(reactorGap),
+    tostring(stackOffsetY),
     tostring(slotW),
     tostring(slotH),
   }, "|")
@@ -238,6 +282,9 @@ function M.drawImageStack(args)
       .. " reactorSize=" .. tostring(reactorVariant and reactorVariant.width or "n/a") .. "x" .. tostring(reactorVariant and reactorVariant.height or "n/a")
       .. " laserVariant=" .. tostring(moduleVariant and moduleVariant.name or "none")
       .. " laserSize=" .. tostring(moduleVariant and moduleVariant.width or "n/a") .. "x" .. tostring(moduleVariant and moduleVariant.height or "n/a")
+      .. " moduleGap=" .. tostring(moduleGap)
+      .. " reactorGap=" .. tostring(reactorGap)
+      .. " stackOffsetY=" .. tostring(stackOffsetY)
       .. " viewport=" .. tostring(slotW) .. "x" .. tostring(slotH)
   )
 
