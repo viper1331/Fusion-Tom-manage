@@ -5,9 +5,42 @@ local ReactorCoreAnimation = assert(dofile("ui/animations/reactor_core.lua"))
 local GpuSafe = assert(dofile("ui/helpers/gpu_safe.lua"))
 local renderLogKeys = {}
 local STACK_CALIBRATION = {
-  large = { moduleGapMul = 0.46, reactorGapMul = 1.92, stackOffsetY = 2, moduleOffsetX = -1, reactorOffsetX = 0 },
-  compact = { moduleGapMul = 0.42, reactorGapMul = 1.70, stackOffsetY = 1, moduleOffsetX = -1, reactorOffsetX = 0 },
-  micro = { moduleGapMul = 0.38, reactorGapMul = 1.40, stackOffsetY = 0, moduleOffsetX = 0, reactorOffsetX = 0 },
+  large = {
+    moduleGapMul = 0.46,
+    reactorGapMul = 2.28,
+    stackOffsetY = 4,
+    moduleOffsetX = 0,
+    reactorOffsetX = 0,
+    topPad = 6,
+    bottomPad = 4,
+    sidePad = 2,
+    maxWFill = 0.92,
+    maxHFill = 0.88,
+  },
+  compact = {
+    moduleGapMul = 0.42,
+    reactorGapMul = 2.00,
+    stackOffsetY = 3,
+    moduleOffsetX = 0,
+    reactorOffsetX = 0,
+    topPad = 5,
+    bottomPad = 3,
+    sidePad = 2,
+    maxWFill = 0.90,
+    maxHFill = 0.86,
+  },
+  micro = {
+    moduleGapMul = 0.38,
+    reactorGapMul = 1.70,
+    stackOffsetY = 2,
+    moduleOffsetX = 0,
+    reactorOffsetX = 0,
+    topPad = 4,
+    bottomPad = 2,
+    sidePad = 1,
+    maxWFill = 0.88,
+    maxHFill = 0.84,
+  },
 }
 
 local function resolveStackCalibration(ui, state)
@@ -24,6 +57,11 @@ local function resolveStackCalibration(ui, state)
   local stackOffsetY = profile.stackOffsetY or 0
   local moduleOffsetX = profile.moduleOffsetX or 0
   local reactorOffsetX = profile.reactorOffsetX or 0
+  local topPad = math.max(0, math.floor(profile.topPad or 0))
+  local bottomPad = math.max(0, math.floor(profile.bottomPad or 0))
+  local sidePad = math.max(0, math.floor(profile.sidePad or 0))
+  local maxWFill = tonumber(profile.maxWFill) or 1
+  local maxHFill = tonumber(profile.maxHFill) or 1
 
   local visual = state and state.visual
   if visual and visual.effectLevel == "minimal" then
@@ -36,6 +74,11 @@ local function resolveStackCalibration(ui, state)
     stackOffsetY = stackOffsetY,
     moduleOffsetX = moduleOffsetX,
     reactorOffsetX = reactorOffsetX,
+    topPad = topPad,
+    bottomPad = bottomPad,
+    sidePad = sidePad,
+    maxWFill = maxWFill,
+    maxHFill = maxHFill,
   }
 end
 
@@ -913,6 +956,22 @@ function M.drawImageStack(args)
   local stackOffsetY = layout.stackOffsetY or stackCalibration.stackOffsetY
   local moduleOffsetX = layout.moduleOffsetX or stackCalibration.moduleOffsetX or 0
   local reactorOffsetX = layout.reactorOffsetX or stackCalibration.reactorOffsetX or 0
+  local topPad = math.max(0, layout.topPad or stackCalibration.topPad or 0)
+  local bottomPad = math.max(0, layout.bottomPad or stackCalibration.bottomPad or 0)
+  local sidePad = math.max(0, layout.sidePad or stackCalibration.sidePad or 0)
+  local viewX = slotX + sidePad
+  local viewY = slotY + topPad
+  local viewW = math.max(1, slotW - sidePad * 2)
+  local viewH = math.max(1, slotH - topPad - bottomPad)
+  if viewW < 1 or viewH < 1 then
+    viewX = slotX
+    viewY = slotY
+    viewW = slotW
+    viewH = slotH
+    topPad = 0
+    bottomPad = 0
+    sidePad = 0
+  end
   local modulesBlockH = 0
 
   if moduleVariant and drawnModuleCount > 0 then
@@ -920,22 +979,26 @@ function M.drawImageStack(args)
   end
 
   local totalH = reactorVariant.height + ((moduleVariant and drawnModuleCount > 0) and (reactorGap + modulesBlockH) or 0)
-  local startY = slotY + math.floor((slotH - totalH) / 2) + stackOffsetY
-  local minStartY = slotY
-  local maxStartY = slotY + math.max(0, slotH - totalH)
+  local totalW = reactorVariant.width
+  if moduleVariant and drawnModuleCount > 0 then
+    totalW = math.max(totalW, moduleVariant.width)
+  end
+  local startY = viewY + math.floor((viewH - totalH) / 2) + stackOffsetY
+  local minStartY = viewY
+  local maxStartY = viewY + math.max(0, viewH - totalH)
   if startY < minStartY then
     startY = minStartY
   elseif startY > maxStartY then
     startY = maxStartY
   end
 
-  local reactorX = slotX + math.floor((slotW - reactorVariant.width) / 2) + reactorOffsetX
-  reactorX = clampValue(reactorX, slotX, slotX + math.max(0, slotW - reactorVariant.width))
+  local reactorX = viewX + math.floor((viewW - reactorVariant.width) / 2) + reactorOffsetX
+  reactorX = clampValue(reactorX, viewX, viewX + math.max(0, viewW - reactorVariant.width))
 
   if moduleVariant and drawnModuleCount > 0 then
     local moduleBaseX = reactorX + math.floor((reactorVariant.width - moduleVariant.width) / 2) + moduleOffsetX
-    local moduleMinX = slotX
-    local moduleMaxX = slotX + math.max(0, slotW - moduleVariant.width)
+    local moduleMinX = viewX
+    local moduleMaxX = viewX + math.max(0, viewW - moduleVariant.width)
     for i = 1, drawnModuleCount do
       local moduleX = clampValue(moduleBaseX, moduleMinX, moduleMaxX)
       local moduleY = startY + ((i - 1) * (moduleVariant.height + moduleGap))
@@ -956,6 +1019,8 @@ function M.drawImageStack(args)
   drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX, slotY, slotW, slotH, reactorX, startY, reactorVariant.width, reactorVariant.height, data)
 
   local renderedMode = moduleVariant and drawnModuleCount > 0 and "pair" or "reactor-only"
+  local fillW = totalW / math.max(1, viewW)
+  local fillH = totalH / math.max(1, viewH)
   local renderedKey = table.concat({
     tostring(renderedMode),
     tostring(reactorVariant and reactorVariant.name or "none"),
@@ -969,6 +1034,11 @@ function M.drawImageStack(args)
     tostring(reactorOffsetX),
     tostring(slotW),
     tostring(slotH),
+    tostring(viewW),
+    tostring(viewH),
+    tostring(topPad),
+    tostring(bottomPad),
+    tostring(sidePad),
   }, "|")
   appendRuntimeLogOnce(
     args,
@@ -987,6 +1057,11 @@ function M.drawImageStack(args)
       .. " stackOffsetY=" .. tostring(stackOffsetY)
       .. " moduleOffsetX=" .. tostring(moduleOffsetX)
       .. " reactorOffsetX=" .. tostring(reactorOffsetX)
+      .. " required=" .. tostring(totalW) .. "x" .. tostring(totalH)
+      .. " availableViewport=" .. tostring(viewW) .. "x" .. tostring(viewH)
+      .. " fillW=" .. string.format("%.2f", fillW)
+      .. " fillH=" .. string.format("%.2f", fillH)
+      .. " scenePadding=" .. tostring(topPad) .. "," .. tostring(bottomPad) .. "," .. tostring(sidePad)
       .. " viewport=" .. tostring(slotW) .. "x" .. tostring(slotH)
   )
 

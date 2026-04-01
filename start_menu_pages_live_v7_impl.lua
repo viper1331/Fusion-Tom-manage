@@ -795,23 +795,38 @@ end
 local function resolveOverviewStackSpacing()
   local smallPad = ui and ui.smallPad or 0
   local moduleGapMul = 0.46
-  local reactorGapMul = 1.92
-  local stackOffsetY = 2
-  local moduleOffsetX = -1
+  local reactorGapMul = 2.28
+  local stackOffsetY = 4
+  local moduleOffsetX = 0
   local reactorOffsetX = 0
+  local topPad = 6
+  local bottomPad = 4
+  local sidePad = 2
+  local maxWFill = 0.92
+  local maxHFill = 0.88
 
   if ui and ui.compact then
     moduleGapMul = 0.42
-    reactorGapMul = 1.70
-    stackOffsetY = 1
-    moduleOffsetX = -1
+    reactorGapMul = 2.00
+    stackOffsetY = 3
+    moduleOffsetX = 0
+    topPad = 5
+    bottomPad = 3
+    sidePad = 2
+    maxWFill = 0.90
+    maxHFill = 0.86
   end
 
   if ui and ui.micro then
     moduleGapMul = 0.38
-    reactorGapMul = 1.40
-    stackOffsetY = 0
+    reactorGapMul = 1.70
+    stackOffsetY = 2
     moduleOffsetX = 0
+    topPad = 4
+    bottomPad = 2
+    sidePad = 1
+    maxWFill = 0.88
+    maxHFill = 0.84
   end
 
   local moduleGap = math.max(1, math.floor(smallPad * moduleGapMul))
@@ -823,6 +838,11 @@ local function resolveOverviewStackSpacing()
     stackOffsetY = stackOffsetY,
     moduleOffsetX = moduleOffsetX,
     reactorOffsetX = reactorOffsetX,
+    topPad = topPad,
+    bottomPad = bottomPad,
+    sidePad = sidePad,
+    maxWFill = maxWFill,
+    maxHFill = maxHFill,
   }
 end
 
@@ -1299,12 +1319,52 @@ end
 
 local lastLayoutFallbackLogKey = nil
 local lastLayoutFallbackRejectLogKey = nil
+local lastLayoutVisualRejectLogKey = nil
+local lastLayoutHardRejectLogKey = nil
+
+local function resolveOverviewVisualBounds(slotW, slotH, spacing)
+  local sidePad = math.max(0, math.floor(spacing.sidePad or 0))
+  local topPad = math.max(0, math.floor(spacing.topPad or 0))
+  local bottomPad = math.max(0, math.floor(spacing.bottomPad or 0))
+  local availableW = math.max(1, slotW - sidePad * 2)
+  local availableH = math.max(1, slotH - topPad - bottomPad)
+
+  return {
+    availableW = availableW,
+    availableH = availableH,
+    sidePad = sidePad,
+    topPad = topPad,
+    bottomPad = bottomPad,
+    maxWFill = tonumber(spacing.maxWFill) or 1.0,
+    maxHFill = tonumber(spacing.maxHFill) or 1.0,
+  }
+end
+
+local function shouldReplaceLayoutCandidate(current, candidate)
+  if not current then
+    return true
+  end
+  if (candidate.rank or 0) ~= (current.rank or 0) then
+    return (candidate.rank or 0) > (current.rank or 0)
+  end
+  if (candidate.score or 0) ~= (current.score or 0) then
+    return (candidate.score or 0) > (current.score or 0)
+  end
+  if (candidate.requiredH or 0) ~= (current.requiredH or 0) then
+    return (candidate.requiredH or 0) < (current.requiredH or 0)
+  end
+  return (candidate.requiredW or 0) < (current.requiredW or 0)
+end
 
 local function chooseStackLayout(slotW, slotH, moduleCount)
   local spacing = resolveOverviewStackSpacing()
+  local visual = resolveOverviewVisualBounds(slotW, slotH, spacing)
   local gap = spacing.reactorGap
   local moduleGap = spacing.moduleGap
-  local best = nil
+  local bestCapped = nil
+  local bestFit = nil
+  local visualReject = nil
+  local hardReject = nil
 
   local reactors = #images.reactorVariants > 0 and images.reactorVariants or {}
   local modules = #images.laserModuleVariants > 0 and images.laserModuleVariants or {}
@@ -1324,64 +1384,127 @@ local function chooseStackLayout(slotW, slotH, moduleCount)
     end
   end
 
+  local function registerCandidate(candidate)
+    local fitsAvailable = candidate.requiredW <= visual.availableW and candidate.requiredH <= visual.availableH
+    if not fitsAvailable then
+      if (not hardReject) or (candidate.requiredW * candidate.requiredH > hardReject.requiredW * hardReject.requiredH) then
+        hardReject = candidate
+      end
+      return
+    end
+
+    local withinCap = candidate.fillW <= visual.maxWFill and candidate.fillH <= visual.maxHFill
+    if withinCap then
+      if shouldReplaceLayoutCandidate(bestCapped, candidate) then
+        bestCapped = candidate
+      end
+      return
+    end
+
+    if shouldReplaceLayoutCandidate(bestFit, candidate) then
+      bestFit = candidate
+    end
+    if (not visualReject) or (candidate.fillW + candidate.fillH > visualReject.fillW + visualReject.fillH) then
+      visualReject = candidate
+    end
+  end
+
   for _, reactorVariant in ipairs(reactors) do
     local reactorRequiredW = reactorVariant.width
     local reactorRequiredH = reactorVariant.height
-
-    if reactorRequiredW <= slotW and reactorRequiredH <= slotH and not best then
-      best = {
-        reactor = reactorVariant,
-        module = nil,
-        moduleCount = 0,
-        score = reactorVariant.width * reactorVariant.height,
-        requiredW = reactorRequiredW,
-        requiredH = reactorRequiredH,
-        moduleGap = moduleGap,
-        reactorGap = gap,
-        stackOffsetY = spacing.stackOffsetY,
-        moduleOffsetX = spacing.moduleOffsetX,
-        reactorOffsetX = spacing.reactorOffsetX,
-      }
-    end
+    registerCandidate({
+      reactor = reactorVariant,
+      module = nil,
+      moduleCount = 0,
+      rank = 1,
+      score = reactorVariant.width * reactorVariant.height,
+      requiredW = reactorRequiredW,
+      requiredH = reactorRequiredH,
+      fillW = reactorRequiredW / math.max(1, visual.availableW),
+      fillH = reactorRequiredH / math.max(1, visual.availableH),
+      moduleGap = moduleGap,
+      reactorGap = gap,
+      stackOffsetY = spacing.stackOffsetY,
+      moduleOffsetX = spacing.moduleOffsetX,
+      reactorOffsetX = spacing.reactorOffsetX,
+      topPad = visual.topPad,
+      bottomPad = visual.bottomPad,
+      sidePad = visual.sidePad,
+      availableW = visual.availableW,
+      availableH = visual.availableH,
+    })
 
     if moduleCount > 0 and #modules > 0 then
       for _, moduleVariant in ipairs(modules) do
         local modulesBlockH = (moduleVariant.height * moduleCount) + (moduleGap * math.max(0, moduleCount - 1))
         local requiredH = reactorVariant.height + gap + modulesBlockH
         local requiredW = math.max(reactorVariant.width, moduleVariant.width)
-
-        if requiredW <= slotW and requiredH <= slotH then
-          local score = (reactorVariant.width * reactorVariant.height * 1000) + (moduleVariant.width * moduleVariant.height)
-          best = {
-            reactor = reactorVariant,
-            module = moduleVariant,
-            moduleCount = moduleCount,
-            score = score,
-            requiredW = requiredW,
-            requiredH = requiredH,
-            modulesBlockH = modulesBlockH,
-            moduleGap = moduleGap,
-            reactorGap = gap,
-            stackOffsetY = spacing.stackOffsetY,
-            moduleOffsetX = spacing.moduleOffsetX,
-            reactorOffsetX = spacing.reactorOffsetX,
-          }
-        end
+        local score = (reactorVariant.width * reactorVariant.height * 1000) + (moduleVariant.width * moduleVariant.height)
+        registerCandidate({
+          reactor = reactorVariant,
+          module = moduleVariant,
+          moduleCount = moduleCount,
+          rank = 2,
+          score = score,
+          requiredW = requiredW,
+          requiredH = requiredH,
+          modulesBlockH = modulesBlockH,
+          fillW = requiredW / math.max(1, visual.availableW),
+          fillH = requiredH / math.max(1, visual.availableH),
+          moduleGap = moduleGap,
+          reactorGap = gap,
+          stackOffsetY = spacing.stackOffsetY,
+          moduleOffsetX = spacing.moduleOffsetX,
+          reactorOffsetX = spacing.reactorOffsetX,
+          topPad = visual.topPad,
+          bottomPad = visual.bottomPad,
+          sidePad = visual.sidePad,
+          availableW = visual.availableW,
+          availableH = visual.availableH,
+        })
       end
     end
   end
 
-  if best then
-    return best
+  if bestCapped then
+    return bestCapped
+  end
+
+  if bestFit then
+    local visualLogKey = table.concat({
+      tostring(slotW),
+      tostring(slotH),
+      tostring(visual.availableW),
+      tostring(visual.availableH),
+      tostring(bestFit.requiredW),
+      tostring(bestFit.requiredH),
+      tostring(bestFit.reactor and bestFit.reactor.name or "none"),
+      tostring(bestFit.module and bestFit.module.name or "none"),
+    }, "|")
+    if visualLogKey ~= lastLayoutVisualRejectLogKey then
+      appendUiRuntimeLog(
+        "layout fallback selected: class=visual_margin_cap"
+          .. " slot=" .. tostring(slotW) .. "x" .. tostring(slotH)
+          .. " availableViewport=" .. tostring(visual.availableW) .. "x" .. tostring(visual.availableH)
+          .. " required=" .. tostring(bestFit.requiredW) .. "x" .. tostring(bestFit.requiredH)
+          .. " fillW=" .. string.format("%.2f", bestFit.fillW or 0)
+          .. " fillH=" .. string.format("%.2f", bestFit.fillH or 0)
+          .. " cap=" .. tostring(visual.maxWFill) .. "," .. tostring(visual.maxHFill)
+      )
+      lastLayoutVisualRejectLogKey = visualLogKey
+    end
+    return bestFit
   end
 
   local fallbackReactor = getFallbackReactorVariant()
-  local slotFits = fallbackReactor and fallbackReactor.width <= slotW and fallbackReactor.height <= slotH
+  local slotFits = fallbackReactor and fallbackReactor.width <= visual.availableW and fallbackReactor.height <= visual.availableH
   if fallbackReactor and slotFits then
     local fallbackLogKey = table.concat({
       tostring(fallbackReactor.name or "runtime"),
       tostring(slotW),
       tostring(slotH),
+      tostring(visual.availableW),
+      tostring(visual.availableH),
       tostring(fallbackReactor.width),
       tostring(fallbackReactor.height),
       "fit",
@@ -1391,8 +1514,9 @@ local function chooseStackLayout(slotW, slotH, moduleCount)
         "layout fallback: reactor-only selected"
           .. " reactor=" .. tostring(fallbackReactor.name or "runtime")
           .. " slot=" .. tostring(slotW) .. "x" .. tostring(slotH)
+          .. " availableViewport=" .. tostring(visual.availableW) .. "x" .. tostring(visual.availableH)
           .. " reactorSize=" .. tostring(fallbackReactor.width) .. "x" .. tostring(fallbackReactor.height)
-          .. " overflow=false"
+          .. " reason=visual_margin_cap"
       )
       lastLayoutFallbackLogKey = fallbackLogKey
     end
@@ -1403,16 +1527,25 @@ local function chooseStackLayout(slotW, slotH, moduleCount)
       score = fallbackReactor.width * fallbackReactor.height,
       requiredW = fallbackReactor.width,
       requiredH = fallbackReactor.height,
+      fillW = fallbackReactor.width / math.max(1, visual.availableW),
+      fillH = fallbackReactor.height / math.max(1, visual.availableH),
       moduleGap = moduleGap,
       reactorGap = gap,
       stackOffsetY = spacing.stackOffsetY,
       moduleOffsetX = spacing.moduleOffsetX,
       reactorOffsetX = spacing.reactorOffsetX,
+      topPad = visual.topPad,
+      bottomPad = visual.bottomPad,
+      sidePad = visual.sidePad,
+      availableW = visual.availableW,
+      availableH = visual.availableH,
     }
   elseif fallbackReactor then
     local rejectLogKey = table.concat({
       tostring(slotW),
       tostring(slotH),
+      tostring(visual.availableW),
+      tostring(visual.availableH),
       tostring(fallbackReactor.width),
       tostring(fallbackReactor.height),
     }, "|")
@@ -1420,9 +1553,55 @@ local function chooseStackLayout(slotW, slotH, moduleCount)
       appendUiRuntimeLog(
         "layout fallback rejected: class=viewport_overflow"
           .. " slot=" .. tostring(slotW) .. "x" .. tostring(slotH)
+          .. " availableViewport=" .. tostring(visual.availableW) .. "x" .. tostring(visual.availableH)
           .. " reactorSize=" .. tostring(fallbackReactor.width) .. "x" .. tostring(fallbackReactor.height)
       )
       lastLayoutFallbackRejectLogKey = rejectLogKey
+    end
+  end
+
+  if hardReject then
+    local hardLogKey = table.concat({
+      tostring(slotW),
+      tostring(slotH),
+      tostring(visual.availableW),
+      tostring(visual.availableH),
+      tostring(hardReject.requiredW or 0),
+      tostring(hardReject.requiredH or 0),
+      tostring(hardReject.reactor and hardReject.reactor.name or "none"),
+      tostring(hardReject.module and hardReject.module.name or "none"),
+    }, "|")
+    if hardLogKey ~= lastLayoutHardRejectLogKey then
+      appendUiRuntimeLog(
+        "layout rejected: class=hard_overflow"
+          .. " slot=" .. tostring(slotW) .. "x" .. tostring(slotH)
+          .. " availableViewport=" .. tostring(visual.availableW) .. "x" .. tostring(visual.availableH)
+          .. " required=" .. tostring(hardReject.requiredW or 0) .. "x" .. tostring(hardReject.requiredH or 0)
+      )
+      lastLayoutHardRejectLogKey = hardLogKey
+    end
+  elseif visualReject then
+    local visualRejectKey = table.concat({
+      tostring(slotW),
+      tostring(slotH),
+      tostring(visual.availableW),
+      tostring(visual.availableH),
+      tostring(visualReject.requiredW or 0),
+      tostring(visualReject.requiredH or 0),
+      tostring(visualReject.reactor and visualReject.reactor.name or "none"),
+      tostring(visualReject.module and visualReject.module.name or "none"),
+    }, "|")
+    if visualRejectKey ~= lastLayoutVisualRejectLogKey then
+      appendUiRuntimeLog(
+        "layout rejected: class=visual_margin_cap"
+          .. " slot=" .. tostring(slotW) .. "x" .. tostring(slotH)
+          .. " availableViewport=" .. tostring(visual.availableW) .. "x" .. tostring(visual.availableH)
+          .. " required=" .. tostring(visualReject.requiredW or 0) .. "x" .. tostring(visualReject.requiredH or 0)
+          .. " fillW=" .. string.format("%.2f", visualReject.fillW or 0)
+          .. " fillH=" .. string.format("%.2f", visualReject.fillH or 0)
+          .. " cap=" .. tostring(visual.maxWFill) .. "," .. tostring(visual.maxHFill)
+      )
+      lastLayoutVisualRejectLogKey = visualRejectKey
     end
   end
 

@@ -4,10 +4,10 @@ local GpuSafe = assert(dofile("ui/helpers/gpu_safe.lua"))
 local CALIBRATION = {
   centerXRatio = 0.438,
   centerYRatio = 0.459,
-  compactScale = 0.80,
-  microScale = 0.64,
-  baseRadiusXRatio = 0.0090,
-  baseRadiusYRatio = 0.0128,
+  compactScale = 0.76,
+  microScale = 0.58,
+  baseRadiusXRatio = 0.0078,
+  baseRadiusYRatio = 0.0109,
 }
 
 local function pulseWave(frame, period)
@@ -231,19 +231,19 @@ function M.draw(args, x, y, w, h, data)
   local drift = (((frame * 11) % 17) / 17) * style.flicker
   local haloFactor = (0.88 + (pulse * 0.16) + drift) * style.haloBoost
 
-  local outerRx = math.max(3, math.floor(baseRadiusX * 2.15 * haloFactor))
-  local outerRy = math.max(4, math.floor(baseRadiusY * 2.20 * haloFactor))
-  local midRx = math.max(2, math.floor(baseRadiusX * 1.55 * haloFactor))
-  local midRy = math.max(3, math.floor(baseRadiusY * 1.60 * haloFactor))
-  local innerRx = math.max(2, math.floor(baseRadiusX * 1.14 * haloFactor))
-  local innerRy = math.max(2, math.floor(baseRadiusY * 1.18 * haloFactor))
+  local outerRx = math.max(3, math.floor(baseRadiusX * 1.95 * haloFactor))
+  local outerRy = math.max(4, math.floor(baseRadiusY * 2.00 * haloFactor))
+  local midRx = math.max(2, math.floor(baseRadiusX * 1.43 * haloFactor))
+  local midRy = math.max(3, math.floor(baseRadiusY * 1.46 * haloFactor))
+  local innerRx = math.max(2, math.floor(baseRadiusX * 1.08 * haloFactor))
+  local innerRy = math.max(2, math.floor(baseRadiusY * 1.10 * haloFactor))
 
   drawSoftEllipse(args, cx, cy, outerRx, outerRy, style.outer)
   drawSoftEllipse(args, cx, cy, midRx, midRy, style.mid)
   drawSoftEllipse(args, cx, cy, innerRx, innerRy, style.inner)
 
-  local coreRx = math.max(1, math.floor(innerRx * (ui.micro and 0.40 or 0.46)))
-  local coreRy = math.max(1, math.floor(innerRy * (ui.micro and 0.42 or 0.50)))
+  local coreRx = math.max(1, math.floor(innerRx * (ui.micro and 0.38 or 0.42)))
+  local coreRy = math.max(1, math.floor(innerRy * (ui.micro and 0.40 or 0.46)))
   drawSoftEllipse(args, cx, cy, coreRx, coreRy, style.core)
   drawSoftEllipse(args, cx, cy - 1, math.max(1, coreRx - 1), math.max(1, coreRy - 1), 0xAAFFFFFF)
 

@@ -4,24 +4,24 @@ local GpuSafe = assert(dofile("ui/helpers/gpu_safe.lua"))
 local CALIBRATION = {
   module = {
     yRatio = 0.502,
-    thicknessRatio = 0.088,
+    thicknessRatio = 0.072,
     leftOuterRatio = 0.095,
     leftInnerRatio = 0.295,
     rightInnerRatio = 0.695,
     rightOuterRatio = 0.900,
   },
   reactorRight = {
-    yRatio = 0.511,
-    thicknessRatio = 0.012,
-    startXRatio = 0.754,
-    endXRatio = 0.910,
+    yRatio = 0.507,
+    thicknessRatio = 0.010,
+    startXRatio = 0.758,
+    endXRatio = 0.905,
     particleScale = 0.70,
     particleHeightScale = 0.78,
   },
   bottom = {
-    topYRatio = 0.826,
-    bottomYRatio = 0.949,
-    thicknessRatio = 0.0062,
+    topYRatio = 0.835,
+    bottomYRatio = 0.953,
+    thicknessRatio = 0.0055,
     axisGlow = 0x0C000000,
     particleW = 1,
     particleH = 1,
@@ -80,12 +80,12 @@ end
 
 local function resolveDensity(ui)
   if ui and ui.micro then
-    return 0.50
+    return 0.45
   end
   if ui and ui.compact then
-    return 0.75
+    return 0.68
   end
-  return 1.00
+  return 0.95
 end
 
 local function effectiveDensity(args, baseDensity)
@@ -221,12 +221,17 @@ local function drawHorizontalParticleFlow(args, spec)
   local trailStep = math.max(1, math.floor(packetW * 0.90))
   local speed = math.max(1, math.floor(style.speed * intensity))
   local count = math.max(1, math.floor(style.count * density + 0.5))
+  local jitterRange = (args.ui and args.ui.micro) and 0 or 1
 
   for i = 1, count do
     local stride = math.max(3, math.floor(travel / count))
     local phase = ((frame * speed) + (i * stride)) % travel
     local px = reverse and (x2 - phase) or (x1 + phase)
-    local py = y - math.floor(packetH / 2)
+    local jitter = 0
+    if jitterRange > 0 then
+      jitter = ((frame + i * 3) % (jitterRange * 2 + 1)) - jitterRange
+    end
+    local py = y - math.floor(packetH / 2) + jitter
     local direction = reverse and 1 or -1
 
     for t = trailSteps, 1, -1 do
