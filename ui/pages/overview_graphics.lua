@@ -118,6 +118,126 @@ local function drawLineSafe(args, x1, y1, x2, y2, color, thickness)
   end
 end
 
+local PORT_CHANNELS = {
+  -- Strict left -> right order requested from field calibration.
+  { key = "tritium", ratio = 0.334, color = 0xFF4DE06D },
+  { key = "dtFuel", ratio = 0.452, color = 0xFFB26BFF },
+  { key = "deuterium", ratio = 0.567, color = 0xFFFF5A5A },
+}
+
+local function formatMkValue(value)
+  local n = tonumber(value)
+  if not n then
+    return "n/a"
+  end
+  return string.format("%.1f", n)
+end
+
+local function formatTemperatureLabel(profile, kind, mkValue)
+  local valueText = formatMkValue(mkValue)
+  if profile.mode == "micro" then
+    if kind == "case" then
+      return "C " .. valueText
+    end
+    return "P " .. valueText
+  end
+
+  if profile.mode == "compact" then
+    if kind == "case" then
+      return "CASE " .. valueText
+    end
+    return "CORE " .. valueText
+  end
+
+  if valueText == "n/a" then
+    if kind == "case" then
+      return "T CASE n/a"
+    end
+    return "T CORE n/a"
+  end
+
+  if kind == "case" then
+    return "T CASE " .. valueText .. " MK"
+  end
+  return "T CORE " .. valueText .. " MK"
+end
+
+local function resolveReaderOpenState(reader, sourcePrefix)
+  if type(reader) ~= "table" or reader.ok ~= true then
+    return nil, nil
+  end
+
+  if type(reader.active) == "boolean" then
+    return reader.active, sourcePrefix .. ".active"
+  end
+
+  if type(reader.currentRedstone) == "number" then
+    return reader.currentRedstone > 0, sourcePrefix .. ".currentRedstone"
+  end
+
+  if type(reader.redstone) == "number" then
+    return reader.redstone > 0, sourcePrefix .. ".redstone"
+  end
+
+  if type(reader.amount) == "number" then
+    return reader.amount > 0, sourcePrefix .. ".amount"
+  end
+
+  return nil, nil
+end
+
+local function resolvePortOpenState(data, key)
+  local readers = type(data) == "table" and data.readers or nil
+  local relayStates = type(data) == "table" and data.relayStates or nil
+
+  if key == "tritium" then
+    local open, source = resolveReaderOpenState(readers and readers.tritium, "reader.tritium")
+    if open ~= nil then
+      return open, source
+    end
+    if relayStates and relayStates.tritiumTank ~= nil then
+      return relayStates.tritiumTank == true, "relay.tritiumTank"
+    end
+    return (tonumber(data and data.tPct) or 0) > 0.1, "inference.tPct"
+  end
+
+  if key == "deuterium" then
+    local open, source = resolveReaderOpenState(readers and readers.deuterium, "reader.deuterium")
+    if open ~= nil then
+      return open, source
+    end
+    if relayStates and relayStates.deuteriumTank ~= nil then
+      return relayStates.deuteriumTank == true, "relay.deuteriumTank"
+    end
+    return (tonumber(data and data.dPct) or 0) > 0.1, "inference.dPct"
+  end
+
+  local open, source = resolveReaderOpenState(readers and readers.dtFuel, "reader.dtFuel")
+  if open ~= nil then
+    return open, source
+  end
+
+  local triRelay = relayStates and relayStates.tritiumTank == true
+  local deuRelay = relayStates and relayStates.deuteriumTank == true
+  if relayStates and (relayStates.tritiumTank ~= nil or relayStates.deuteriumTank ~= nil) then
+    return triRelay and deuRelay, "inference.relayPair"
+  end
+
+  local injection = tonumber(data and data.injectionRateValue) or 0
+  local dtPct = tonumber(data and data.dtPct) or 0
+  local ignited = data and data.ignited == true
+  return ((ignited and dtPct > 0.1) or injection > 0), "inference.dtPct|injection"
+end
+
+local function formatPortStatus(profile, channelKey, isOpen)
+  local stateText = isOpen and profile.portStateOpen or profile.portStateClosed
+  local name = profile.portNames[channelKey] or string.upper(channelKey)
+  if profile.mode == "micro" then
+    return name .. " " .. stateText
+  end
+  return name .. " " .. stateText
+end
+
 local function drawLeaderLabel(args, spec)
   local gpu = args and args.gpu
   if not gpu then
@@ -207,48 +327,81 @@ local function resolveAnnotationProfile(ui, slotW, slotH)
   if ui and ui.micro then
     return {
       enabled = true,
-      caseLabel = "CASE",
-      coreLabel = "CORE",
-      portsLabel = "PORTS",
+      mode = "micro",
       lineThickness = 1,
       rightOffset = 3,
-      leftOffset = 3,
       diagStep = 5,
-      bottomDiag = 5,
       labelPadX = 1,
+      caseDiagY = -4,
+      caseLabelDy = -3,
+      coreDiagY = 5,
+      coreLabelDy = -3,
+      portKneeY = 4,
+      portKneeX = { -3, 0, 3 },
+      portLabelDx = { -13, -8, -2 },
+      portLabelDy = { 4, 5, 6 },
+      portNames = {
+        tritium = "T",
+        dtFuel = "DT",
+        deuterium = "D",
+      },
+      portStateOpen = "O",
+      portStateClosed = "F",
     }
   end
 
   if ui and ui.compact then
     return {
       enabled = true,
-      caseLabel = "T CASE",
-      coreLabel = "T CORE",
-      portsLabel = "PORTS",
+      mode = "compact",
       lineThickness = 1,
       rightOffset = 5,
-      leftOffset = 5,
       diagStep = 7,
-      bottomDiag = 7,
       labelPadX = 2,
+      caseDiagY = -6,
+      caseLabelDy = -5,
+      coreDiagY = 8,
+      coreLabelDy = -5,
+      portKneeY = 7,
+      portKneeX = { -7, 0, 7 },
+      portLabelDx = { -40, -24, -8 },
+      portLabelDy = { 6, 8, 10 },
+      portNames = {
+        tritium = "TRI",
+        dtFuel = "DT",
+        deuterium = "DEU",
+      },
+      portStateOpen = "OUVERT",
+      portStateClosed = "FERME",
     }
   end
 
   return {
     enabled = true,
-    caseLabel = "T CASE",
-    coreLabel = "T CORE",
-    portsLabel = "PORTS",
+    mode = "large",
     lineThickness = 2,
     rightOffset = 7,
-    leftOffset = 7,
     diagStep = 9,
-    bottomDiag = 10,
     labelPadX = 2,
+    caseDiagY = -8,
+    caseLabelDy = -6,
+    coreDiagY = 9,
+    coreLabelDy = -6,
+    portKneeY = 9,
+    portKneeX = { -9, 0, 9 },
+    portLabelDx = { -52, -30, -9 },
+    portLabelDy = { 8, 11, 14 },
+    portNames = {
+      tritium = "TRITIUM",
+      dtFuel = "DT-FUEL",
+      deuterium = "DEUTERIUM",
+    },
+    portStateOpen = "OUVERT",
+    portStateClosed = "FERME",
   }
 end
 
-local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX, slotY, slotW, slotH, reactorX, reactorY, reactorW, reactorH)
+local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX, slotY, slotW, slotH, reactorX, reactorY, reactorW, reactorH, data)
   local ui = args.ui
   local profile = resolveAnnotationProfile(ui, slotW, slotH)
   if not profile.enabled then
@@ -256,24 +409,25 @@ local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX
   end
 
   local smallPad = ui and ui.smallPad or 1
-  local lineColor = 0xFFE54E60
-  local textColor = lineColor
-  local bgColor = 0xDD141A22
-  local borderColor = 0xFF2B3646
+  local tempColor = 0xFFE54E60
+  local bgColor = 0xC0151B24
+  local borderColor = 0xCC2B3646
+  local caseLabelText = formatTemperatureLabel(profile, "case", data and data.caseMK)
+  local coreLabelText = formatTemperatureLabel(profile, "core", data and data.plasmaMK)
 
-  local caseAnchorX = reactorX + math.floor(reactorW * 0.79)
-  local caseAnchorY = reactorY + math.floor(reactorH * 0.33)
+  local caseAnchorX = reactorX + math.floor(reactorW * 0.78)
+  local caseAnchorY = reactorY + math.floor(reactorH * 0.34)
   local caseKneeX = clampValue(caseAnchorX + profile.diagStep, slotX + 1, slotX + slotW - 2)
-  local caseKneeY = clampValue(caseAnchorY - math.max(4, profile.diagStep - 2), slotY + 1, slotY + slotH - 2)
+  local caseKneeY = clampValue(caseAnchorY + profile.caseDiagY, slotY + 1, slotY + slotH - 2)
   local caseLabelX = caseKneeX + profile.rightOffset + smallPad
-  local caseLabelY = caseKneeY - (ui and ui.micro and 4 or 6)
+  local caseLabelY = caseKneeY + profile.caseLabelDy
 
   drawLeaderLabel(args, {
     name = "CASE",
-    text = profile.caseLabel,
+    text = caseLabelText,
     size = 1,
     padX = profile.labelPadX,
-    padY = 1,
+    padY = 0,
     slotX = slotX,
     slotY = slotY,
     slotW = slotW,
@@ -285,9 +439,9 @@ local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX
     anchorY = caseAnchorY,
     kneeX = caseKneeX,
     kneeY = caseKneeY,
-    lineColor = lineColor,
+    lineColor = tempColor,
     lineThickness = profile.lineThickness,
-    textColor = textColor,
+    textColor = tempColor,
     bgColor = bgColor,
     borderColor = borderColor,
     drawTextCenter = drawTextCenter,
@@ -295,18 +449,18 @@ local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX
   })
 
   local coreAnchorX = reactorX + math.floor(reactorW * 0.52)
-  local coreAnchorY = reactorY + math.floor(reactorH * 0.50)
+  local coreAnchorY = reactorY + math.floor(reactorH * 0.52)
   local coreKneeX = clampValue(coreAnchorX + profile.diagStep, slotX + 1, slotX + slotW - 2)
-  local coreKneeY = clampValue(coreAnchorY + profile.diagStep, slotY + 1, slotY + slotH - 2)
+  local coreKneeY = clampValue(coreAnchorY + profile.coreDiagY, slotY + 1, slotY + slotH - 2)
   local coreLabelX = coreKneeX + profile.rightOffset + smallPad
-  local coreLabelY = coreKneeY - (ui and ui.micro and 4 or 6)
+  local coreLabelY = coreKneeY + profile.coreLabelDy
 
   drawLeaderLabel(args, {
     name = "CORE",
-    text = profile.coreLabel,
+    text = coreLabelText,
     size = 1,
     padX = profile.labelPadX,
-    padY = 1,
+    padY = 0,
     slotX = slotX,
     slotY = slotY,
     slotW = slotW,
@@ -318,47 +472,71 @@ local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX
     anchorY = coreAnchorY,
     kneeX = coreKneeX,
     kneeY = coreKneeY,
-    lineColor = lineColor,
+    lineColor = tempColor,
     lineThickness = profile.lineThickness,
-    textColor = textColor,
+    textColor = tempColor,
     bgColor = bgColor,
     borderColor = borderColor,
     drawTextCenter = drawTextCenter,
     textPixelHeight = textPixelHeight,
   })
 
-  local portsAnchorX = reactorX + math.floor(reactorW * 0.52)
-  local portsAnchorY = reactorY + math.floor(reactorH * 0.90)
-  local portsKneeX = clampValue(portsAnchorX - profile.bottomDiag, slotX + 1, slotX + slotW - 2)
-  local portsKneeY = clampValue(portsAnchorY + profile.bottomDiag, slotY + 1, slotY + slotH - 2)
-  local portsLabelX = portsKneeX - (ui and ui.micro and 42 or 60)
-  local portsLabelY = portsKneeY + 1
+  local portTelemetrySummary = {}
+  for idx, channel in ipairs(PORT_CHANNELS) do
+    local portAnchorX = reactorX + math.floor(reactorW * channel.ratio)
+    local portAnchorY = reactorY + math.floor(reactorH * 0.91)
+    local portKneeX = clampValue(portAnchorX + (profile.portKneeX[idx] or 0), slotX + 1, slotX + slotW - 2)
+    local portKneeY = clampValue(portAnchorY + profile.portKneeY, slotY + 1, slotY + slotH - 2)
+    local portLabelX = portKneeX + (profile.portLabelDx[idx] or 0)
+    local portLabelY = portKneeY + (profile.portLabelDy[idx] or 0)
+    local isOpen, source = resolvePortOpenState(data, channel.key)
+    local labelText = formatPortStatus(profile, channel.key, isOpen)
+    local side = (portLabelX < portAnchorX) and "left" or "right"
 
-  drawLeaderLabel(args, {
-    name = "PORTS",
-    text = profile.portsLabel,
-    size = 1,
-    padX = profile.labelPadX,
-    padY = 1,
-    slotX = slotX,
-    slotY = slotY,
-    slotW = slotW,
-    slotH = slotH,
-    labelX = portsLabelX,
-    labelY = portsLabelY,
-    side = "left",
-    anchorX = portsAnchorX,
-    anchorY = portsAnchorY,
-    kneeX = portsKneeX,
-    kneeY = portsKneeY,
-    lineColor = lineColor,
-    lineThickness = profile.lineThickness,
-    textColor = textColor,
-    bgColor = bgColor,
-    borderColor = borderColor,
-    drawTextCenter = drawTextCenter,
-    textPixelHeight = textPixelHeight,
-  })
+    drawLeaderLabel(args, {
+      name = "FLOW_" .. string.upper(channel.key),
+      text = labelText,
+      size = 1,
+      padX = profile.labelPadX,
+      padY = 0,
+      slotX = slotX,
+      slotY = slotY,
+      slotW = slotW,
+      slotH = slotH,
+      labelX = portLabelX,
+      labelY = portLabelY,
+      side = side,
+      anchorX = portAnchorX,
+      anchorY = portAnchorY,
+      kneeX = portKneeX,
+      kneeY = portKneeY,
+      lineColor = channel.color,
+      lineThickness = profile.lineThickness,
+      textColor = channel.color,
+      bgColor = bgColor,
+      borderColor = borderColor,
+      drawTextCenter = drawTextCenter,
+      textPixelHeight = textPixelHeight,
+    })
+
+    portTelemetrySummary[#portTelemetrySummary + 1] =
+      channel.key .. "=" .. (isOpen and "open" or "closed") .. "@" .. tostring(source or "n/a")
+  end
+
+  local annotationStateKey = table.concat({
+    tostring(caseLabelText),
+    tostring(coreLabelText),
+    table.concat(portTelemetrySummary, ","),
+  }, "|")
+  appendRuntimeLogOnce(
+    args,
+    "overview_annotation_state",
+    annotationStateKey,
+    "overview annotations: "
+      .. "case=\"" .. tostring(caseLabelText) .. "\" "
+      .. "core=\"" .. tostring(coreLabelText) .. "\" "
+      .. "flows=" .. table.concat(portTelemetrySummary, ",")
+  )
 end
 
 function M.drawImageStack(args)
@@ -553,7 +731,7 @@ function M.drawImageStack(args)
   drawReactorCoreAnimationAt(args, reactorX, startY, reactorVariant.width, reactorVariant.height, data)
   drawReactorRightCableFluxAt(args, reactorX, startY, reactorVariant.width, reactorVariant.height, data)
   drawReactorBottomGasFluxAt(args, reactorX, startY, reactorVariant.width, reactorVariant.height, data)
-  drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX, slotY, slotW, slotH, reactorX, startY, reactorVariant.width, reactorVariant.height)
+  drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX, slotY, slotW, slotH, reactorX, startY, reactorVariant.width, reactorVariant.height, data)
 
   local renderedMode = moduleVariant and drawnModuleCount > 0 and "pair" or "reactor-only"
   local renderedKey = table.concat({
