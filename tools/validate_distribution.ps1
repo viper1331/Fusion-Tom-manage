@@ -1,6 +1,7 @@
 param(
   [string]$ManifestPath = "fusion.manifest.json",
-  [string]$VersionPath = "fusion.version"
+  [string]$VersionPath = "fusion.version",
+  [string]$ExpectedEntrypoint = "start.lua"
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,8 +23,18 @@ function Normalize-ManifestPath {
   return $normalized
 }
 
+function Is-ValidCommitSha {
+  param([string]$Value)
+  return -not [string]::IsNullOrWhiteSpace($Value) -and ($Value -match '^[0-9a-f]{40}$')
+}
+
 $errors = New-Object System.Collections.Generic.List[string]
 $warnings = New-Object System.Collections.Generic.List[string]
+
+$expectedEntrypointPath = Normalize-ManifestPath -Path $ExpectedEntrypoint
+if ([string]::IsNullOrWhiteSpace($expectedEntrypointPath)) {
+  $errors.Add("expected entrypoint is empty")
+}
 
 if (-not (Test-Path -LiteralPath $VersionPath)) {
   $errors.Add("version file missing: $VersionPath")
@@ -57,11 +68,32 @@ if ($null -ne $manifest) {
     $errors.Add("version mismatch: fusion.version=$versionText manifest.version=$($manifest.version)")
   }
 
+  if ($manifest.PSObject.Properties.Name -notcontains "commit" -or -not (Is-ValidCommitSha -Value ([string]$manifest.commit)) ) {
+    $errors.Add("manifest.commit missing or invalid (expected 40-char lowercase SHA)")
+  }
+
+  if ($manifest.PSObject.Properties.Name -notcontains "source" -or $null -eq $manifest.source) {
+    $errors.Add("manifest.source missing")
+  } elseif ($manifest.source.PSObject.Properties.Name -notcontains "commit" -or -not (Is-ValidCommitSha -Value ([string]$manifest.source.commit))) {
+    $errors.Add("manifest.source.commit missing or invalid (expected 40-char lowercase SHA)")
+  } elseif ([string]$manifest.source.commit -ne [string]$manifest.commit) {
+    $errors.Add("commit mismatch: manifest.commit=$($manifest.commit) source.commit=$($manifest.source.commit)")
+  }
+
   $entrypoint = Normalize-ManifestPath -Path ([string]$manifest.entrypoint)
   if ($entrypoint -eq "") {
     $errors.Add("manifest.entrypoint missing")
-  } elseif (-not (Test-Path -LiteralPath $entrypoint)) {
-    $errors.Add("manifest entrypoint missing on disk: $entrypoint")
+  } else {
+    if ($entrypoint -ne $expectedEntrypointPath) {
+      $errors.Add("manifest.entrypoint mismatch: expected=$expectedEntrypointPath actual=$entrypoint")
+    }
+    if (-not (Test-Path -LiteralPath $entrypoint)) {
+      $errors.Add("manifest entrypoint missing on disk: $entrypoint")
+    }
+  }
+
+  if (-not (Test-Path -LiteralPath $expectedEntrypointPath)) {
+    $errors.Add("expected entrypoint missing on disk: $expectedEntrypointPath")
   }
 
   if ($manifest.PSObject.Properties.Name -notcontains "files" -or $null -eq $manifest.files) {
@@ -103,6 +135,43 @@ if ($null -ne $manifest) {
     if ($entrypoint -ne "" -and -not $filePaths.Contains($entrypoint)) {
       $errors.Add("entrypoint not listed in manifest.files: $entrypoint")
     }
+
+    if (-not $filePaths.Contains($expectedEntrypointPath)) {
+      $errors.Add("expected entrypoint not listed in manifest.files: $expectedEntrypointPath")
+    }
+
+    $legacyShimPath = "start_menu_pages_live_v7.lua"
+    if (Test-Path -LiteralPath $legacyShimPath -and -not $filePaths.Contains($legacyShimPath)) {
+      $errors.Add("legacy shim missing in manifest.files: $legacyShimPath")
+    }
+
+    $rescuePath = "rescue_update.lua"
+    if (Test-Path -LiteralPath $rescuePath -and -not $filePaths.Contains($rescuePath)) {
+      $errors.Add("rescue mode missing in manifest.files: $rescuePath")
+    }
+
+    $criticalOverviewFiles = @(
+      "ui/pages/overview_page.lua",
+      "ui/pages/overview_graphics.lua",
+      "ui/animations/electric_flow.lua",
+      "ui/animations/reactor_core.lua",
+      "ui/helpers/gpu_safe.lua",
+      "ui/helpers/callout_renderer.lua"
+    )
+
+    foreach ($criticalPath in $criticalOverviewFiles) {
+      if (-not (Test-Path -LiteralPath $criticalPath)) {
+        $errors.Add("critical overview file missing on disk: $criticalPath")
+        continue
+      }
+      if (-not $filePaths.Contains($criticalPath)) {
+        $errors.Add("critical overview file missing in manifest.files: $criticalPath")
+      }
+    }
+
+    if ($manifest.PSObject.Properties.Name -notcontains "project" -or [string]::IsNullOrWhiteSpace([string]$manifest.project)) {
+      $warnings.Add("manifest.project missing (recommended for release metadata)")
+    }
   }
 }
 
@@ -126,5 +195,6 @@ Write-Host ("  version: " + $versionText)
 if ($null -ne $manifest) {
   Write-Host ("  manifest: " + $ManifestPath)
   Write-Host ("  entrypoint: " + [string]$manifest.entrypoint)
+  Write-Host ("  commit: " + [string]$manifest.commit)
   Write-Host ("  files: " + @($manifest.files).Count)
 }

@@ -40,6 +40,16 @@ Chemins utilises par le mode secours:
 - Le manifest distant est lu sur la branche configuree.
 - Les fichiers d'update sont telecharges depuis le `commit` fige declare dans le manifest.
 - Script de generation recommande : `powershell -ExecutionPolicy Bypass -File tools/generate_manifest.ps1`
+- Script release recommande : `powershell -ExecutionPolicy Bypass -File tools/release_prepare.ps1`
 - Regenerer le manifest avant chaque push de release pour synchroniser `size/hash/hashAlgo/commit`.
 - La liste `files` doit contenir uniquement les fichiers necessaires au runtime distribue.
 - Les chemins avec espaces sont supportes (encodage URL), mais a eviter pour les assets non essentiels.
+
+## Workflow release standard
+
+1. Mettre a jour le code.
+2. Incrementer `fusion.version`.
+3. Lancer `powershell -ExecutionPolicy Bypass -File tools/release_prepare.ps1`.
+4. Creer un commit fonctionnel (code/outillage/version).
+5. Creer un commit de release pour la synchro finale du manifest (pin commit/hash/size).
+6. Push sur `origin/main`.
