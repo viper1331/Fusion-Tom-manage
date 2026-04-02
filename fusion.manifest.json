@@ -8,7 +8,7 @@
                    "repo":  "Fusion-Tom-manage",
                    "branch":  "main",
                    "manifestPath":  "fusion.manifest.json",
-                   "commit":  "9b4924e3db1ec04e5351e5a2bdf182876fff0721"
+                   "commit":  "20990afb9514a6e2faf2846364ca1f86e9b2a343"
                },
     "integrity":  {
                       "mode":  "hash+size",
@@ -447,5 +447,5 @@
                       "hashAlgo":  "sha256"
                   }
               ],
-    "commit":  "9b4924e3db1ec04e5351e5a2bdf182876fff0721"
+    "commit":  "20990afb9514a6e2faf2846364ca1f86e9b2a343"
 }
