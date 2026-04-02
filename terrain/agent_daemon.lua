@@ -54,6 +54,12 @@ local function loadConfig()
   if cfg.commandAckEndpoint == nil or cfg.commandAckEndpoint == "" then
     cfg.commandAckEndpoint = "/command/ack"
   end
+  if cfg.processedIdsFile == nil or cfg.processedIdsFile == "" then
+    cfg.processedIdsFile = "/terrain_agent.processed_ids.json"
+  end
+  if cfg.processedIdsMax == nil or tonumber(cfg.processedIdsMax) == nil then
+    cfg.processedIdsMax = 128
+  end
   return cfg
 end
 
@@ -275,6 +281,68 @@ local function readLastCommandId(path)
   return ""
 end
 
+local function readProcessedIds(path)
+  local payload = decodeJsonFile(path)
+  local set = {}
+  local order = {}
+
+  if type(payload) ~= "table" then
+    return set, order
+  end
+
+  local ids = payload.ids
+  if type(ids) == "table" then
+    for _, rawId in ipairs(ids) do
+      local id = trim(rawId)
+      if id ~= "" and not set[id] then
+        set[id] = true
+        order[#order + 1] = id
+      end
+    end
+    return set, order
+  end
+
+  -- Legacy fallback when ids were persisted as map keys.
+  for key, value in pairs(payload) do
+    local id = trim(key)
+    if type(value) == "boolean" and value and id ~= "" and not set[id] then
+      set[id] = true
+      order[#order + 1] = id
+    end
+  end
+
+  return set, order
+end
+
+local function saveProcessedIds(path, order, maxCount)
+  local keep = math.max(1, tonumber(maxCount) or 128)
+  local startIndex = math.max(1, (#order - keep) + 1)
+  local ids = {}
+  for idx = startIndex, #order do
+    ids[#ids + 1] = order[idx]
+  end
+  return saveJsonFile(path, {
+    ids = ids,
+    updatedAt = nowText(),
+  })
+end
+
+local function rememberProcessedId(cfg, set, order, id)
+  id = trim(id)
+  if id == "" then
+    return
+  end
+  if set[id] then
+    return
+  end
+  set[id] = true
+  order[#order + 1] = id
+  local ok, err = saveProcessedIds(cfg.processedIdsFile, order, cfg.processedIdsMax)
+  if not ok then
+    appendLog("processed ids save failed: " .. tostring(err))
+  end
+end
+
 local function saveCommandSnapshot(path, command)
   local snapshot = {
     id = trim(command and command.id or ""),
@@ -418,8 +486,10 @@ function Agent.runLoop()
   local cfg = loadConfig()
   appendLog("daemon start: collector=" .. tostring(cfg.collectorBaseUrl) .. " computer=" .. tostring(cfg.computerName))
   local lastProcessedId = readLastCommandId(cfg.commandFile)
+  local processedIds, processedOrder = readProcessedIds(cfg.processedIdsFile)
   if lastProcessedId ~= "" then
     appendLog("resume from last command id=" .. lastProcessedId)
+    rememberProcessedId(cfg, processedIds, processedOrder, lastProcessedId)
   end
   local previousConnectivity = nil
   local duplicateLoggedId = ""
@@ -439,21 +509,32 @@ function Agent.runLoop()
         local id = commandId(command)
         local kind = commandName(command)
         if id == "" then
-          appendLog("command ignored: missing id command=" .. tostring(kind))
-          emitResult(cfg, {
-            ok = false,
-            command = kind,
-            id = "",
-            detail = "invalid command: missing id",
-            localVersion = readVersion(),
-          })
-        elseif id == lastProcessedId then
+          if kind == "" or kind == "noop" then
+            -- Idle poll without pending command; keep loop silent and avoid spam results.
+          else
+            appendLog("command ignored: missing id command=" .. tostring(kind))
+            emitResult(cfg, {
+              ok = false,
+              command = kind,
+              id = "",
+              detail = "invalid command: missing id",
+              localVersion = readVersion(),
+            })
+          end
+        elseif id == lastProcessedId or processedIds[id] then
           if duplicateLoggedId ~= id then
-            appendLog("command skipped duplicate id=" .. tostring(id))
+            appendLog("command skipped duplicate id=" .. tostring(id) .. " reason=already_processed")
             duplicateLoggedId = id
+          end
+          local ackOk, ackErr = ackCommand(cfg, id)
+          if ackOk then
+            appendLog("command duplicate ack ok id=" .. tostring(id))
+          else
+            appendLog("command duplicate ack failed id=" .. tostring(id) .. " err=" .. tostring(ackErr))
           end
         else
           duplicateLoggedId = ""
+          rememberProcessedId(cfg, processedIds, processedOrder, id)
           local okHandle, resultOrErr = pcall(handleCommand, cfg, command)
           local finalResult
           if not okHandle then
@@ -488,6 +569,7 @@ function Agent.runLoop()
           end
 
           lastProcessedId = id
+          rememberProcessedId(cfg, processedIds, processedOrder, id)
           appendLog("command completed id=" .. tostring(id) .. " ok=" .. tostring(finalResult.ok) .. " detail=" .. tostring(finalResult.detail))
         end
       elseif commandErr then

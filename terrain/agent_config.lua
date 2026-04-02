@@ -15,4 +15,6 @@ return {
   pendingReportFile = "/terrain_agent.pending_report.json",
   pendingResultFile = "/terrain_agent.pending_result.json",
   heartbeatFile = "/terrain_agent.heartbeat",
+  processedIdsFile = "/terrain_agent.processed_ids.json",
+  processedIdsMax = 128,
 }

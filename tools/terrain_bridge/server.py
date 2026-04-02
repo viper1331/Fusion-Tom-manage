@@ -10,6 +10,8 @@ from urllib.parse import parse_qs, urlparse, unquote
 
 ROOT = Path(__file__).resolve().parent / "data"
 COMMANDS = ROOT / "commands"
+CONSUMED = COMMANDS / "consumed"
+PROCESSED = COMMANDS / "processed_ids.json"
 RESULTS = ROOT / "results"
 REPORTS = ROOT / "reports"
 PUBLISH = ROOT / "publish"
@@ -17,7 +19,7 @@ LOG_FILE = ROOT / "bridge.log"
 ACTIVITY_FILE = ROOT / "activity.json"
 LOCK = threading.Lock()
 
-for path in (COMMANDS, RESULTS, REPORTS, PUBLISH):
+for path in (COMMANDS, CONSUMED, RESULTS, REPORTS, PUBLISH):
     path.mkdir(parents=True, exist_ok=True)
 
 
@@ -129,15 +131,104 @@ def record_ack(computer: str, command_id: str, ok: bool, detail: str):
     log_event("command_ack", computer=computer, id=command_id, ok=ok, detail=detail)
 
 
+def normalize_command_id(value):
+    raw = str(value or "").strip()
+    lowered = raw.lower()
+    if lowered in {"", "no-id", "none", "null", "nil"}:
+        return ""
+    return raw
+
+
+def read_processed_registry():
+    data = read_json(PROCESSED)
+    if isinstance(data, dict):
+        return data
+    return {}
+
+
+def is_processed(computer: str, command_id: str) -> bool:
+    command_id = normalize_command_id(command_id)
+    if command_id == "":
+        return False
+    data = read_processed_registry()
+    bucket = data.get(computer)
+    if isinstance(bucket, dict):
+        return command_id in bucket
+    return False
+
+
+def mark_processed(computer: str, command_id: str, source: str, detail: str = "", payload=None):
+    command_id = normalize_command_id(command_id)
+    if command_id == "":
+        return
+    with LOCK:
+        data = read_processed_registry()
+        bucket = data.get(computer)
+        if not isinstance(bucket, dict):
+            bucket = {}
+        entry = bucket.get(command_id)
+        if not isinstance(entry, dict):
+            entry = {}
+        entry["id"] = command_id
+        entry["computer"] = computer
+        entry["source"] = source
+        entry["detail"] = detail or ""
+        entry["at"] = now_text()
+        if isinstance(payload, dict):
+            command_name = payload.get("command") or payload.get("kind") or payload.get("label")
+            if command_name:
+                entry["command"] = str(command_name)
+        bucket[command_id] = entry
+
+        if len(bucket) > 400:
+            ordered = sorted(
+                bucket.items(),
+                key=lambda item: str((item[1] or {}).get("at", "")),
+            )
+            for key, _ in ordered[: len(bucket) - 400]:
+                bucket.pop(key, None)
+
+        data[computer] = bucket
+        write_json(PROCESSED, data)
+
+
+def archive_command(computer: str, payload, reason: str):
+    stamp = now_text().replace(":", "-").replace(" ", "_")
+    command_id = normalize_command_id(payload.get("id") if isinstance(payload, dict) else "")
+    if command_id == "":
+        command_id = "no-id"
+    target = CONSUMED / f"{computer}-{command_id}-{stamp}.json"
+    archive_payload = {
+        "computer": computer,
+        "id": command_id,
+        "reason": reason,
+        "archivedAt": now_text(),
+        "command": payload,
+    }
+    write_json(target, archive_payload)
+
+
+def consume_stale_command(computer: str, payload, reason: str):
+    target = COMMANDS / f"{computer}.json"
+    archive_command(computer, payload, reason)
+    target.unlink(missing_ok=True)
+    command_id = normalize_command_id(payload.get("id") if isinstance(payload, dict) else "")
+    if command_id:
+        mark_processed(computer, command_id, "stale_cleanup", reason, payload)
+    log_event("command_stale_cleanup", computer=computer, id=command_id, reason=reason)
+
+
 def clear_command(computer: str, expected_id: str):
     target = COMMANDS / f"{computer}.json"
     payload = read_json(target)
     if payload is None:
         return False, "not_found"
-    current_id = str(payload.get("id", ""))
+    current_id = normalize_command_id(payload.get("id", ""))
     if expected_id and current_id != expected_id:
         return False, "id_mismatch"
+    archive_command(computer, payload, "ack")
     target.unlink(missing_ok=True)
+    mark_processed(computer, current_id, "ack", "cleared", payload)
     return True, "cleared"
 
 
@@ -179,8 +270,15 @@ class Handler(BaseHTTPRequestHandler):
             computer = params.get("computer", ["fusion_terrain_01"])[0]
             target = COMMANDS / f"{computer}.json"
             payload = read_json(target) or {"id": "", "command": "noop"}
-            command_id = str(payload.get("id", "") or "")
-            command_name = str(payload.get("command", "") or "")
+            command_id = normalize_command_id(payload.get("id", "") if isinstance(payload, dict) else "")
+            command_name = str(payload.get("command", "") or "") if isinstance(payload, dict) else ""
+
+            if command_id != "" and is_processed(computer, command_id):
+                consume_stale_command(computer, payload, "already_processed")
+                record_command_poll(computer, command_id, "replay_blocked")
+                self._send_json({"id": "", "command": "noop"})
+                return
+
             record_command_poll(computer, command_id, command_name)
             self._send_json(payload)
             return
@@ -210,20 +308,28 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/result":
             computer = payload.get("computerName") or payload.get("computer") or "unknown"
-            command_id = payload.get("id") or payload.get("commandId") or "no-id"
-            target = RESULTS / f"{computer}-{command_id}.json"
+            command_id = normalize_command_id(payload.get("id") or payload.get("commandId"))
+            target_id = command_id if command_id != "" else "no-id"
+            if command_id != "":
+                mark_processed(str(computer), command_id, "result", "result_posted", payload)
+            target = RESULTS / f"{computer}-{target_id}.json"
             write_json(target, payload)
             status = "ok" if payload.get("ok", False) else "error"
-            record_result(str(computer), str(command_id), status)
+            record_result(str(computer), str(target_id), status)
             self._send_json({"ok": True})
             return
 
         if parsed.path == "/report":
             computer = payload.get("computerName") or payload.get("computer") or "unknown"
             label = payload.get("label") or payload.get("kind") or "report"
-            raw_stamp = payload.get("sentAt") or payload.get("at") or "unknown"
-            timestamp = str(raw_stamp).replace(":", "-").replace(" ", "_")
-            target = REPORTS / f"{computer}-{label}-{timestamp}.json"
+            command_id = normalize_command_id(payload.get("commandId") or payload.get("id"))
+            if command_id != "":
+                target = REPORTS / f"{computer}-{label}-{command_id}.json"
+                mark_processed(str(computer), command_id, "report", "report_posted", payload)
+            else:
+                raw_stamp = payload.get("sentAt") or payload.get("at") or "unknown"
+                timestamp = str(raw_stamp).replace(":", "-").replace(" ", "_")
+                target = REPORTS / f"{computer}-{label}-{timestamp}.json"
             write_json(target, payload)
             record_report(str(computer), str(label))
             self._send_json({"ok": True})
