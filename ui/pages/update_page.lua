@@ -1,6 +1,8 @@
 local RenderCommon = assert(dofile("ui/helpers/render_common.lua"))
+local UpdateFormat = assert(dofile("core/update/format.lua"))
 
 local M = {}
+local pageLogKeys = {}
 
 local function toInt(value)
   local n = tonumber(value)
@@ -43,6 +45,72 @@ local function shorten(text, maxLen)
   return string.sub(value, 1, limit - 3) .. "..."
 end
 
+local function defaultFirstLine(value)
+  local text = tostring(value or "")
+  local idx = string.find(text, "\n", 1, true)
+  if idx then
+    return string.sub(text, 1, idx - 1)
+  end
+  return text
+end
+
+local function resolveFirstLine(args)
+  if type(args.firstLine) == "function" then
+    return args.firstLine
+  end
+  return defaultFirstLine
+end
+
+local function resolveShortCommit(args)
+  if type(args.shortCommit) == "function" then
+    return args.shortCommit, true
+  end
+  return UpdateFormat.shortCommit, false
+end
+
+local function ensureUpdateState(raw)
+  local src = type(raw) == "table" and raw or {}
+  return {
+    remoteStatus = tostring(src.remoteStatus or "IDLE"),
+    integrityMode = tostring(src.integrityMode or "size+hash"),
+    hashValidationRequired = src.hashValidationRequired == true,
+    hashValidated = src.hashValidated == true,
+    statusDetail = tostring(src.statusDetail or ""),
+    integrityStatus = tostring(src.integrityStatus or "INTEGRITY PENDING"),
+    integrityDetail = tostring(src.integrityDetail or ""),
+    localVersion = tostring(src.localVersion or "n/a"),
+    remoteVersion = tostring(src.remoteVersion or "n/a"),
+    channel = tostring(src.channel or "stable"),
+    remoteBranch = tostring(src.remoteBranch or "-"),
+    remoteCommit = tostring(src.remoteCommit or "n/a"),
+    filesToUpdate = toInt(src.filesToUpdate),
+    lastCheck = tostring(src.lastCheck or "never"),
+    lastApply = tostring(src.lastApply or "never"),
+    lastDownload = tostring(src.lastDownload or "never"),
+    lastCheckSummary = tostring(src.lastCheckSummary or "-"),
+    lastError = tostring(src.lastError or "none"),
+    downloaded = src.downloaded == true,
+    canRollback = src.canRollback == true,
+    applyConfirmArmed = src.applyConfirmArmed == true,
+    downloadProgress = type(src.downloadProgress) == "table" and src.downloadProgress or {},
+    validationProgress = type(src.validationProgress) == "table" and src.validationProgress or {},
+    logs = type(src.logs) == "table" and src.logs or {},
+  }
+end
+
+local function logUpdatePageOnce(args, tag, signature, message)
+  local appendUiRuntimeLog = args and args.appendUiRuntimeLog
+  if type(appendUiRuntimeLog) ~= "function" then
+    return
+  end
+  local key = tostring(tag or "update_page_log")
+  local sig = tostring(signature or message)
+  if pageLogKeys[key] ~= sig then
+    appendUiRuntimeLog(message)
+    pageLogKeys[key] = sig
+  end
+end
+
 local function buildPhaseProgress(rawState, fallbackPhase)
   local raw = type(rawState) == "table" and rawState or {}
   local totalFiles = toInt(raw.totalFiles)
@@ -77,11 +145,13 @@ local function buildPhaseProgress(rawState, fallbackPhase)
 end
 
 local function buildDownloadProgress(updateState)
-  return buildPhaseProgress(updateState.downloadProgress, updateState.remoteStatus or "IDLE")
+  local state = type(updateState) == "table" and updateState or {}
+  return buildPhaseProgress(state.downloadProgress, state.remoteStatus or "IDLE")
 end
 
 local function buildValidationProgress(updateState)
-  return buildPhaseProgress(updateState.validationProgress, "IDLE")
+  local state = type(updateState) == "table" and updateState or {}
+  return buildPhaseProgress(state.validationProgress, "IDLE")
 end
 
 local function shortPhaseStatus(status)
@@ -109,6 +179,8 @@ end
 local function buildStatusRows(ctx)
   local updateState = ctx.updateState
   local C = ctx.colors
+  local shortCommitFn = type(ctx.shortCommitFn) == "function" and ctx.shortCommitFn or UpdateFormat.shortCommit
+  local firstLineFn = type(ctx.firstLineFn) == "function" and ctx.firstLineFn or defaultFirstLine
   local downloadProgress = buildDownloadProgress(updateState)
   local validationProgress = buildValidationProgress(updateState)
 
@@ -132,7 +204,7 @@ local function buildStatusRows(ctx)
     { label = "REMOTE VERSION", value = updateState.remoteVersion, color = C.yellow },
     { label = "CHANNEL", value = updateState.channel, color = C.text },
     { label = "BRANCH", value = updateState.remoteBranch or "-", color = C.text },
-    { label = "REMOTE COMMIT", value = ctx.shortCommit(updateState.remoteCommit, 12), color = C.cyan },
+    { label = "REMOTE COMMIT", value = shortCommitFn(updateState.remoteCommit, 12), color = C.cyan },
     { label = "FILES TO UPDATE", value = tostring(updateState.filesToUpdate), color = updateState.filesToUpdate > 0 and C.orange or C.green },
     { label = "LAST CHECK", value = updateState.lastCheck, color = C.text },
     { label = "LAST APPLY", value = updateState.lastApply, color = C.text },
@@ -140,7 +212,7 @@ local function buildStatusRows(ctx)
     { label = "CHECK SUMMARY", value = updateState.lastCheckSummary, color = C.muted },
     {
       label = "LAST ERROR",
-      value = updateState.lastError == "none" and "-" or ctx.firstLine(updateState.lastError),
+      value = updateState.lastError == "none" and "-" or firstLineFn(updateState.lastError),
       color = updateState.lastError == "none" and C.muted or C.red,
     },
   }
@@ -150,7 +222,19 @@ function M.drawMicro(args)
   local r = args.rect
   local ui = args.ui
   local C = args.colors
-  local updateState = args.updateState
+  local updateState = ensureUpdateState(args.updateState)
+  local shortCommitFn, shortCommitAvailable = resolveShortCommit(args)
+  local updateStatusColorFn = type(args.updateStatusColor) == "function" and args.updateStatusColor or function() return C.muted end
+  local className = tostring((ui and (ui.overviewScreenClass or ui.overviewResponsiveMode)) or "unknown")
+  local sizeText = tostring(ui and ui.sw or "n/a") .. "x" .. tostring(ui and ui.sh or "n/a")
+
+  local beginKey = table.concat({ "micro", className, sizeText, tostring(updateState.remoteStatus) }, "|")
+  logUpdatePageOnce(args, "update_page_render_begin_micro", beginKey, "update page render begin | mode=micro class=" .. className .. " size=" .. sizeText)
+  logUpdatePageOnce(args, "update_page_context_micro", beginKey, "update page context ok | mode=micro status=" .. tostring(updateState.remoteStatus) .. " filesToUpdate=" .. tostring(updateState.filesToUpdate))
+  logUpdatePageOnce(args, "update_page_short_commit_micro", beginKey .. "|" .. tostring(shortCommitAvailable), "update page shortCommit available=" .. tostring(shortCommitAvailable))
+
+  -- Keep helper reference reachable for diagnostics even in micro mode.
+  local _ = shortCommitFn(updateState.remoteCommit, 8)
 
   args.drawPanel(r.x, r.y, r.w, r.h, "MAJ")
 
@@ -177,7 +261,7 @@ function M.drawMicro(args)
 
   rowY = rowY + 9
   args.drawText(infoRect.x + 1, rowY, "ST", C.text, 1)
-  args.drawTextRight(infoRect.x + infoRect.w - 1, rowY, shortPhaseStatus(updateState.remoteStatus), args.updateStatusColor(updateState.remoteStatus), 1)
+  args.drawTextRight(infoRect.x + infoRect.w - 1, rowY, shortPhaseStatus(updateState.remoteStatus), updateStatusColorFn(updateState.remoteStatus), 1)
 
   rowY = rowY + 9
   args.drawText(infoRect.x + 1, rowY, "DL", C.text, 1)
@@ -206,13 +290,25 @@ function M.drawMicro(args)
   args.drawButton("UPDATE_APPLY", x1, y2, bw, bh, "APPLY", "green", updateState.downloaded)
   args.drawButton("UPDATE_ROLLBACK", x2, y2, bw, bh, "ROLL", "orange", updateState.canRollback)
   args.drawButton("UPDATE_RESTART", x1, y3, bw * 2 + gap, bh, "RESTART", "red", true)
+  logUpdatePageOnce(args, "update_page_validation_micro", beginKey, "update page validation: ok | mode=micro class=" .. className .. " size=" .. sizeText)
 end
 
 function M.draw(args)
   local r = args.rect
   local ui = args.ui
   local C = args.colors
-  local updateState = args.updateState
+  local updateState = ensureUpdateState(args.updateState)
+  local shortCommitFn, shortCommitAvailable = resolveShortCommit(args)
+  local firstLineFn = resolveFirstLine(args)
+  local updateStatusColorFn = type(args.updateStatusColor) == "function" and args.updateStatusColor or function() return C.muted end
+  local integrityStatusColorFn = type(args.integrityStatusColor) == "function" and args.integrityStatusColor or function() return C.muted end
+  local className = tostring((ui and (ui.overviewScreenClass or ui.overviewResponsiveMode)) or "unknown")
+  local sizeText = tostring(ui and ui.sw or "n/a") .. "x" .. tostring(ui and ui.sh or "n/a")
+
+  local beginKey = table.concat({ "full", className, sizeText, tostring(updateState.remoteStatus) }, "|")
+  logUpdatePageOnce(args, "update_page_render_begin_full", beginKey, "update page render begin | mode=full class=" .. className .. " size=" .. sizeText)
+  logUpdatePageOnce(args, "update_page_context_full", beginKey, "update page context ok | mode=full status=" .. tostring(updateState.remoteStatus) .. " filesToUpdate=" .. tostring(updateState.filesToUpdate))
+  logUpdatePageOnce(args, "update_page_short_commit_full", beginKey .. "|" .. tostring(shortCommitAvailable), "update page shortCommit available=" .. tostring(shortCommitAvailable))
 
   local topRatio = ui.compact and 0.68 or 0.72
   local top, actions = args.splitVertical(r, topRatio)
@@ -256,7 +352,7 @@ function M.draw(args)
   rowY = rowY + step
   args.drawToggleRow(statusRect, rowY, "CURRENT FILE", currentFileValue, C.text)
   rowY = rowY + step
-  args.drawToggleRow(statusRect, rowY, "STATUS", updateState.remoteStatus, args.updateStatusColor(updateState.remoteStatus))
+  args.drawToggleRow(statusRect, rowY, "STATUS", updateState.remoteStatus, updateStatusColorFn(updateState.remoteStatus))
   rowY = rowY + step
   if not ui.compact then
     args.drawToggleRow(statusRect, rowY, "BYTES", activeProgress.bytesText, C.muted)
@@ -267,11 +363,11 @@ function M.draw(args)
   local statusRows = buildStatusRows({
     updateState = updateState,
     colors = C,
-    updateStatusColor = args.updateStatusColor,
-    integrityStatusColor = args.integrityStatusColor,
+    updateStatusColor = updateStatusColorFn,
+    integrityStatusColor = integrityStatusColorFn,
     integrityStatusOk = args.integrityStatusOk,
-    shortCommit = args.shortCommit,
-    firstLine = args.firstLine,
+    shortCommitFn = shortCommitFn,
+    firstLineFn = firstLineFn,
   })
 
   local maxRows = math.max(2, math.floor((statusRect.y + statusRect.h - baseY - ui.pad) / step))
@@ -296,7 +392,7 @@ function M.draw(args)
     pad = ui.pad,
     maxLogLines = maxLogLines,
     drawText = args.drawText,
-    firstLine = args.firstLine,
+    firstLine = firstLineFn,
     emptyText = "no update log yet",
     mutedColor = C.muted,
     colorResolver = function(_, low)
@@ -339,6 +435,7 @@ function M.draw(args)
   local bw2 = math.floor((usableW - gap) / 2)
   args.drawButton("UPDATE_ROLLBACK", x1, y2, bw2, bh, "[ROLLBACK]", "orange", updateState.canRollback)
   args.drawButton("UPDATE_RESTART", x1 + bw2 + gap, y2, bw2, bh, "[RESTART]", "red", true)
+  logUpdatePageOnce(args, "update_page_validation_full", beginKey, "update page validation: ok | mode=full class=" .. className .. " size=" .. sizeText)
 end
 
 return M

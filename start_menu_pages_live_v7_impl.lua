@@ -172,6 +172,7 @@ local INTEGRITY_STATUS = {
 }
 
 local UpdateVersion = assert(dofile("core/update/version.lua"))
+local UpdateFormat = assert(dofile("core/update/format.lua"))
 local UpdateManifest = assert(dofile("core/update/manifest.lua"))
 local UpdateClient = assert(dofile("core/update/client.lua"))
 local UpdateApply = assert(dofile("core/update/apply.lua"))
@@ -1162,6 +1163,7 @@ local loadUpdateLogTail = updateRuntime.loadUpdateLogTail
 local updateStatusColor = updateRuntime.updateStatusColor
 local integrityStatusColor = updateRuntime.integrityStatusColor
 local shortIntegrityStatus = updateRuntime.shortIntegrityStatus
+local shortCommit = updateRuntime.shortCommit or UpdateFormat.shortCommit
 local refreshLocalUpdateSnapshot = updateRuntime.refreshLocalUpdateSnapshot
 local performUpdateCheck = updateRuntime.performUpdateCheck
 local performUpdateDownload = updateRuntime.performUpdateDownload
@@ -1350,6 +1352,7 @@ local function drawMicroMajPage(r, data)
     drawButton = drawButton,
     sv = sv,
     shortCommit = shortCommit,
+    appendUiRuntimeLog = appendUiRuntimeLog,
     updateStatusColor = updateStatusColor,
     shortIntegrityStatus = shortIntegrityStatus,
     integrityStatusColor = integrityStatusColor,
@@ -1374,6 +1377,7 @@ local function drawUpdatePage(r)
     sv = sv,
     firstLine = firstLine,
     shortCommit = shortCommit,
+    appendUiRuntimeLog = appendUiRuntimeLog,
     updateStatusColor = updateStatusColor,
     integrityStatusColor = integrityStatusColor,
   })

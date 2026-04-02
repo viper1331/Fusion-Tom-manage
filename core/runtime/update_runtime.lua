@@ -1,4 +1,5 @@
 local M = {}
+local UpdateFormat = assert(dofile("core/update/format.lua"))
 
 function M.create(args)
   local state = args.state
@@ -358,18 +359,7 @@ local function setIntegrityFromError(rawErr)
   end
 end
 
-local function shortCommit(commit, length)
-  local value = type(commit) == "string" and commit or ""
-  if value == "" or value == "n/a" then
-    return "n/a"
-  end
-
-  local size = math.max(4, math.floor(length or 8))
-  if #value <= size then
-    return value
-  end
-  return string.sub(value, 1, size)
-end
+local shortCommit = UpdateFormat.shortCommit
 
 local function writeTextFile(path, text)
   local fh = fs.open(path, "w")
@@ -1197,6 +1187,7 @@ end
     updateStatusColor = updateStatusColor,
     integrityStatusColor = integrityStatusColor,
     shortIntegrityStatus = shortIntegrityStatus,
+    shortCommit = shortCommit,
     refreshLocalUpdateSnapshot = refreshLocalUpdateSnapshot,
     performUpdateCheck = performUpdateCheck,
     performUpdateDownload = performUpdateDownload,
