@@ -203,6 +203,7 @@ local NavigationView = assert(dofile("ui/components/navigation.lua"))
 local UpdatePageView = assert(dofile("ui/pages/update_page.lua"))
 local ControlPageView = assert(dofile("ui/pages/control_page.lua"))
 local FuelPageView = assert(dofile("ui/pages/fuel_page.lua"))
+local SystemPageView = assert(dofile("ui/pages/system_page.lua"))
 local OverviewCalibration = assert(dofile("ui/pages/overview_calibration.lua"))
 local OverviewPageView = assert(dofile("ui/pages/overview_page.lua"))
 local OverviewGraphicsView = assert(dofile("ui/pages/overview_graphics.lua"))
@@ -3759,48 +3760,25 @@ local function drawFuelPage(r, data)
 end
 
 local function drawSystemPage(r, data)
-  local left, right
-  if ui.compact then
-    left, right = splitVertical(r, 0.50)
-  else
-    left, right = splitHorizontal(r, 0.50)
-  end
-
-  drawPanel(left.x, left.y, left.w, left.h, "SYSTEM INFO")
-  local rowY = left.y + sv(54)
-  drawToggleRow(left, rowY, "GPU", ACTIVE_GPU_NAME, C.cyan)
-  drawToggleRow(left, rowY + sv(18), "SCREEN", tostring(ui.sw) .. "x" .. tostring(ui.sh), C.text)
-  drawToggleRow(left, rowY + sv(36), "MODE", tostring(GPU_MODE), C.text)
-  drawToggleRow(left, rowY + sv(54), "LOGIC", data.logicPresent and "ONLINE" or "OFFLINE", data.logicPresent and C.green or C.red)
-  drawToggleRow(left, rowY + sv(72), "INDUCTION", data.inductionPresent and "ONLINE" or "OFFLINE", data.inductionPresent and C.green or C.red)
-  drawToggleRow(left, rowY + sv(90), "AMPLIFIER", data.amplifierPresent and "ONLINE" or "OFFLINE", data.amplifierPresent and C.green or C.red)
-  drawToggleRow(left, rowY + sv(108), "LASER", data.laserPresent and "ONLINE" or "OFFLINE", data.laserPresent and C.green or C.red)
-  drawToggleRow(left, rowY + sv(126), "FLOW IN/OUT", data.energyFlowIn .. " / " .. data.energyFlowOut, C.text)
-  drawToggleRow(left, rowY + sv(144), "TRANSFER CAP", data.transferCapText, C.text)
-  drawToggleRow(left, rowY + sv(162), "MESSAGE", state.message, C.green)
-
-  local refreshY = left.y + left.h - sv(56)
-  local bw = left.w - ui.pad * 2
-  drawButton("RELOAD_ASSETS", left.x + ui.pad, refreshY, bw, math.max(ui.buttonH, sv(36)), "[RELOAD ASSETS]", "cyan", true)
-
-  drawPanel(right.x, right.y, right.w, right.h, "VISUAL CHECK")
-  local innerX = right.x + ui.pad
-  local innerY = right.y + sv(38)
-  local innerW = right.w - ui.pad * 2
-  local innerH = right.h - sv(46)
-  gpu.filledRectangle(innerX, innerY, innerW, innerH, C.white)
-  gpu.rectangle(innerX, innerY, innerW, innerH, C.border)
-  drawImageStack(innerX + ui.smallPad, innerY + ui.smallPad, innerW - ui.smallPad * 2, innerH - ui.smallPad * 2, data)
-
-  local infoBaseY = innerY + innerH - sv(74)
-  drawText(innerX + ui.smallPad, infoBaseY, "LOGIC MODE", C.text, 1)
-  drawTextRight(innerX + innerW - ui.smallPad, infoBaseY, data.logicMode, C.cyan, 1)
-  drawText(innerX + ui.smallPad, infoBaseY + sv(18), "ACTIVE COOL", C.text, 1)
-  drawTextRight(innerX + innerW - ui.smallPad, infoBaseY + sv(18), data.activeCooled and "ON" or "OFF", data.activeCooled and C.cyan or C.muted, 1)
-  drawText(innerX + ui.smallPad, infoBaseY + sv(36), "ENV LOSS", C.text, 1)
-  drawTextRight(innerX + innerW - ui.smallPad, infoBaseY + sv(36), data.environmentalLossText, C.orange, 1)
-  drawText(innerX + ui.smallPad, infoBaseY + sv(54), "XFER LOSS", C.text, 1)
-  drawTextRight(innerX + innerW - ui.smallPad, infoBaseY + sv(54), data.transferLossText, C.orange, 1)
+  SystemPageView.draw({
+    rect = r,
+    data = data,
+    ui = ui,
+    colors = C,
+    state = state,
+    splitVertical = splitVertical,
+    splitHorizontal = splitHorizontal,
+    drawPanel = drawPanel,
+    drawToggleRow = drawToggleRow,
+    drawButton = drawButton,
+    drawText = drawText,
+    drawTextRight = drawTextRight,
+    drawImageStack = drawImageStack,
+    sv = sv,
+    gpu = gpu,
+    activeGpuName = ACTIVE_GPU_NAME,
+    gpuMode = GPU_MODE,
+  })
 end
 
 local function applyOverviewValidationScenario(baseData, scenario)
