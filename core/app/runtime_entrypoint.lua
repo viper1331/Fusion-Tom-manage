@@ -86,8 +86,12 @@ function M.run(args)
     local function runTerrainWorker()
       appendStartupLog("entrypoint: terrain worker start")
       while true do
-        local ok, bootErr = pcall(runScript, terrainBoot, { "--hosted" })
-        appendStartupLog("entrypoint: terrain worker cycle ok=" .. tostring(ok) .. (ok and "" or (" err=" .. tostring(bootErr))))
+        _G.__fusionTerrainHosted = true
+        local ok, bootResultOrErr = pcall(runScript, terrainBoot, {})
+        _G.__fusionTerrainHosted = nil
+
+        local cycleOk = (ok and bootResultOrErr ~= false)
+        appendStartupLog("entrypoint: terrain worker cycle ok=" .. tostring(cycleOk) .. (cycleOk and "" or (" err=" .. tostring(bootResultOrErr))))
         sleep(math.min(terrainDelay, 2))
       end
     end

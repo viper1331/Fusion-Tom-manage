@@ -49,18 +49,8 @@ local function resolveRuntimeMode()
   return normalizeRuntimeMode(cfg.runtimeMode)
 end
 
-local function hasArg(name)
-  local args = { ... }
-  for _, value in ipairs(args) do
-    if tostring(value) == tostring(name) then
-      return true
-    end
-  end
-  return false
-end
-
 local runtimeMode = resolveRuntimeMode()
-local hostedMode = hasArg("--hosted")
+local hostedMode = (rawget(_G, "__fusionTerrainHosted") == true)
 if runtimeMode == "runtime_gated" and not hostedMode then
   appendBootLog("boot: runtime-gated mode without host, refusing standalone daemon start")
   return
