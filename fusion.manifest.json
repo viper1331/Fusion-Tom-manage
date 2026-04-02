@@ -1,6 +1,6 @@
 {
     "name":  "Fusion-Tom-manage",
-    "version":  "1.2.44",
+    "version":  "1.2.45",
     "channel":  "stable",
     "entrypoint":  "start.lua",
     "source":  {
@@ -8,7 +8,7 @@
                    "repo":  "Fusion-Tom-manage",
                    "branch":  "main",
                    "manifestPath":  "fusion.manifest.json",
-                   "commit":  "ebf57362dab04bd79bdc2cdff241d0397ce80ba4"
+                   "commit":  "acf19f921213fe2874f3df41aa9d3891552eb06a"
                },
     "integrity":  {
                       "mode":  "hash+size",
@@ -41,7 +41,7 @@
                   {
                       "path":  "fusion.version",
                       "size":  6,
-                      "hash":  "e5870929282cade761968b1db379386ec4f0bf614e70f147ef6c5df6a374feb8",
+                      "hash":  "6f71b6e139f16f9f6beb2b4513809a5526e212084588a99bb8cd021a0e20d536",
                       "hashAlgo":  "sha256"
                   },
                   {
@@ -280,8 +280,8 @@
                   },
                   {
                       "path":  "start_menu_pages_live_v7_impl.lua",
-                      "size":  141266,
-                      "hash":  "b5407bfa510847936eae69823b71d3b0bf9f3590ddaf113042a90c8d3def97fa",
+                      "size":  47307,
+                      "hash":  "c60c5fd5eb71b0b34ca89870f802f29db9478f1e1b71d820a80ea4cc45426c7b",
                       "hashAlgo":  "sha256"
                   },
                   {
@@ -319,7 +319,19 @@
                       "size":  3456,
                       "hash":  "207db0e892cfbe450182cac3a5da49b5729cb44726adb95d7552c1ecff0f2eef",
                       "hashAlgo":  "sha256"
+                  },
+                  {
+                      "path":  "core/runtime/update_runtime.lua",
+                      "size":  48643,
+                      "hash":  "ec38fc4cec636025e5487332cf8607549bd185cf389bb93d837effc6f47a4040",
+                      "hashAlgo":  "sha256"
+                  },
+                  {
+                      "path":  "ui/helpers/overview_scene_runtime.lua",
+                      "size":  50281,
+                      "hash":  "7d6e8c346b7319333f891a2d3ecf3e48a79f002c2d42be8c6aca98a2748222db",
+                      "hashAlgo":  "sha256"
                   }
               ],
-    "commit":  "ebf57362dab04bd79bdc2cdff241d0397ce80ba4"
+    "commit":  "acf19f921213fe2874f3df41aa9d3891552eb06a"
 }
