@@ -38,13 +38,38 @@ Ce dossier contient le pont local PC <-> ComputerCraft pour la branche de brouil
 ./tools/write_command.ps1 -Command sync_and_test
 ```
 
-Si `-Computer` est omis, le script tente de lire `terrainAgent.testComputerName` puis `terrainAgent.computerName` dans `fusion_config.lua`, sinon retombe sur `fusion_test_01`.
+Si `-Computer` est omis, le script cible la machine de test depuis `fusion_config.lua`.
 Resolution exacte:
 1. `-Computer` (si fourni)
-2. `terrainAgent.computerName` depuis `fusion_config.lua` (si non vide)
-3. dernier poll detecte dans `tools/terrain_bridge/data/activity.json`
-4. fallback `fusion_test_01`
-(`bridge_self_test*` et `ack_probe*` sont ignores automatiquement pour eviter les faux ciblages)
+2. `terrainAgent.testComputerName` depuis `fusion_config.lua` (si non vide)
+3. `terrainAgent.computerName` depuis `fusion_config.lua` (si non vide)
+4. dernier poll detecte dans `tools/terrain_bridge/data/activity.json`
+5. fallback `fusion_test_01`
+(`bridge_self_test*`, `ack_probe*`, `fusion_terrain_*` et `computer_<id>` sont ignores automatiquement)
+
+Noms autorises uniquement:
+- `fusion_test_01`
+- `fusion_primary_01`
+
+## Run terrain isole (machine de test)
+
+Workflow recommande pour obtenir un diagnostic propre et non ambigu:
+
+```powershell
+./tools/run_terrain_test_session.ps1 -Command sync_and_test
+```
+
+Le script:
+1. resolve explicitement la cible (uniquement `fusion_test_01`);
+2. purge proprement une commande residuelle (sauf `-SkipPurge`);
+3. envoie la commande avec un `sessionId` dedie;
+4. attend le triplet utile:
+   - `result` pour le `commandId`
+   - `report` pour le `commandId`
+   - `ack` bridge pour le `commandId`
+5. detecte un rejeu si un meme `id` emet des evenements multiples;
+6. ecrit un resume de session dans:
+   - `tools/terrain_bridge/data/sessions/<sessionId>/summary.json`
 
 Si `-ExpectedVersion` est omis, le script tente de lire `fusion.version`.
 
@@ -53,7 +78,7 @@ Si `-ExpectedVersion` est omis, le script tente de lire `fusion.version`.
 Script unique (test + principal):
 
 ```powershell
-./tools/deploy_post_main_dual_target.ps1 -PrimaryComputer fusion_terrain_main
+./tools/deploy_post_main_dual_target.ps1 -TestComputer fusion_test_01 -PrimaryComputer fusion_primary_01
 ```
 
 Ce script:

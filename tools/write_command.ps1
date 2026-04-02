@@ -5,6 +5,8 @@ param(
 
   [string]$Computer = "",
   [string]$ExpectedVersion = "",
+  [string]$SessionId = "",
+  [switch]$JsonOutput,
   [string]$OutputRoot = "tools/terrain_bridge/data/commands",
   [string]$FusionConfigPath = "fusion_config.lua",
   [string]$BridgeActivityPath = "tools/terrain_bridge/data/activity.json"
@@ -189,6 +191,7 @@ $payload = [pscustomobject]@{
   id = $id
   command = $Command
   expectedVersion = $resolvedExpectedVersion
+  sessionId = ([string]$SessionId).Trim()
   createdAt = (Get-Date).ToString("s")
 }
 
@@ -203,4 +206,22 @@ Write-Host ("  command: " + $Command)
 Write-Host ("  computer: " + $resolvedComputer + " (source=" + [string]$computerResolution.Source + ")")
 if ($resolvedExpectedVersion -ne "") {
   Write-Host ("  expectedVersion: " + $resolvedExpectedVersion + " (source=" + [string]$expectedVersionResolution.Source + ")")
+}
+if ($payload.sessionId -ne "") {
+  Write-Host ("  sessionId: " + $payload.sessionId)
+}
+
+if ($JsonOutput) {
+  $outputPayload = [pscustomobject]@{
+    ok = $true
+    id = $id
+    command = $Command
+    computer = $resolvedComputer
+    computerSource = [string]$computerResolution.Source
+    expectedVersion = $resolvedExpectedVersion
+    expectedVersionSource = [string]$expectedVersionResolution.Source
+    sessionId = $payload.sessionId
+    commandPath = $target
+  }
+  Write-Output ($outputPayload | ConvertTo-Json -Depth 10 -Compress)
 }

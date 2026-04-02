@@ -34,11 +34,16 @@ Comportement startup:
 Boucle terrain attendue:
 1. `powershell -ExecutionPolicy Bypass -File tools/start_terrain_bridge.ps1`
 2. `powershell -ExecutionPolicy Bypass -File tools/publish_local_release.ps1`
-3. `powershell -ExecutionPolicy Bypass -File tools/write_command.ps1 -Command sync_and_test`
+3. `powershell -ExecutionPolicy Bypass -File tools/run_terrain_test_session.ps1 -Command sync_and_test`
 4. le daemon terrain recupere la commande, synchronise la MAJ et publie resultats/rapports.
 5. (optionnel) verifier le bridge local avec `powershell -ExecutionPolicy Bypass -File tools/test_terrain_bridge.ps1`.
 
-Note: `tools/write_command.ps1` resolve automatiquement le `computerName` depuis `fusion_config.lua` si l'argument `-Computer` est omis.
+Note: `tools/write_command.ps1` et `tools/run_terrain_test_session.ps1` n'acceptent que les cibles autorisees (`fusion_test_01`, `fusion_primary_01`) et evitent les anciens noms (`fusion_terrain_*`, `computer_<id>`).
+
+Run terrain isole recommande (machine de test):
+- script: `tools/run_terrain_test_session.ps1`
+- sortie de session: `tools/terrain_bridge/data/sessions/<sessionId>/summary.json`
+- resume contient: `commandId`, `result`, `report`, `ack`, compteurs d'evenements et detection de rejeu.
 
 Workflow post-main double-cible (test + principal):
 1. publication depuis `main` (`tools/publish_local_release.ps1`);
