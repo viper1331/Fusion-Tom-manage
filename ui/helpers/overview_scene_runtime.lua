@@ -395,6 +395,10 @@ local function resolveOverviewStackSpacing(options)
   }
 end
 
+-- Forward declaration: used by viewport fit helpers defined above
+-- the concrete implementation lower in this module.
+local resolveOverviewVisualBounds
+
 local function reactorFitsViewport(reactorVariant, viewportW, viewportH)
   if not reactorVariant then
     return false
@@ -942,7 +946,7 @@ local lastLayoutHardRejectLogKey = nil
 local lastOverviewPairReductionLogKey = nil
 local lastOverviewPairAcceptedLogKey = nil
 
-local function resolveOverviewVisualBounds(slotW, slotH, spacing)
+function resolveOverviewVisualBounds(slotW, slotH, spacing)
   local sidePad = math.max(0, math.floor(spacing.sidePad or 0))
   local topPad = math.max(0, math.floor(spacing.topPad or 0))
   local bottomPad = math.max(0, math.floor(spacing.bottomPad or 0))
