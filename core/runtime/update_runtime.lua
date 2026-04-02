@@ -2,6 +2,15 @@ local M = {}
 
 function M.create(args)
   local state = args.state
+  local colors = type(args.colors) == "table" and args.colors or {}
+  local C = {
+    green = tonumber(colors.green) or 0xFF40D46A,
+    orange = tonumber(colors.orange) or 0xFFE3A33D,
+    cyan = tonumber(colors.cyan) or 0xFF52C7FF,
+    yellow = tonumber(colors.yellow) or 0xFFE4C84A,
+    red = tonumber(colors.red) or 0xFFE05252,
+    muted = tonumber(colors.muted) or 0xFF9AA8B8,
+  }
   local UPDATE_CFG = args.updateCfg
   local UPDATE_STATUS = args.updateStatus
   local INTEGRITY_STATUS = args.integrityStatus
@@ -18,6 +27,29 @@ function M.create(args)
   local firstLine = args.firstLine
   local nowMs = args.nowMs
   local logWithLevel = args.logWithLevel
+
+local function clamp(value, minValue, maxValue)
+  local n = tonumber(value) or 0
+  local minN = tonumber(minValue) or 0
+  local maxN = tonumber(maxValue) or minN
+  if n < minN then
+    return minN
+  end
+  if n > maxN then
+    return maxN
+  end
+  return n
+end
+
+local function round(value, precision)
+  local p = math.max(0, math.floor(tonumber(precision) or 0))
+  local factor = 10 ^ p
+  local n = tonumber(value) or 0
+  if n >= 0 then
+    return math.floor(n * factor + 0.5) / factor
+  end
+  return math.ceil(n * factor - 0.5) / factor
+end
 
 local function nowText()
   local ok, value = pcall(os.date, "%Y-%m-%d %H:%M:%S")
@@ -1147,6 +1179,16 @@ local function requestProgramRestart()
   appendUpdateLogLine("RESTART requested: " .. tostring(entrypoint))
   os.queueEvent("fusion_restart")
   return true, "restart queued: " .. tostring(entrypoint)
+end
+
+if type(logWithLevel) == "function" then
+  logWithLevel("INFO", "UPDATE", "update runtime state loaded", {
+    integrityMode = tostring(state and state.update and state.update.integrityMode or UPDATE_CFG.integrityMode or "size+hash"),
+    hashRequired = tostring(state and state.update and state.update.hashValidationRequired ~= false),
+  }, "runtime")
+  logWithLevel("DEBUG", "UPDATE", "update runtime muted state", {
+    muted = string.format("0x%08X", tonumber(C.muted) or 0),
+  }, "runtime")
 end
 
   return {

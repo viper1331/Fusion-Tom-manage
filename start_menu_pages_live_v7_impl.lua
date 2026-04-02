@@ -531,6 +531,7 @@ local displayState = {
   lastScreenClassKey = nil,
   lastSurvivalModeKey = nil,
   lastPanelCollapseKey = nil,
+  lastPageValidationKey = nil,
 }
 
 local MIN_VALID_SCREEN_W = 32
@@ -903,8 +904,18 @@ local function buildUI()
       )
       displayState.lastSurvivalModeKey = survivalKey
     end
+
+    if survivalKey ~= displayState.lastPanelCollapseKey then
+      appendUiRuntimeLog(
+        "panels collapsed for ultra compact"
+          .. " class=" .. tostring(screenClass)
+          .. " size=" .. tostring(sw) .. "x" .. tostring(sh)
+      )
+      displayState.lastPanelCollapseKey = survivalKey
+    end
   else
     displayState.lastSurvivalModeKey = nil
+    displayState.lastPanelCollapseKey = nil
   end
 
   local headerH = micro and math.max(24, math.floor(28 * scale + 0.5)) or math.max(56, math.floor(72 * scale + 0.5))
@@ -1101,6 +1112,7 @@ end
 -- === Update subsystem ===
 local updateRuntime = UpdateRuntime.create({
   state = state,
+  colors = C,
   updateCfg = UPDATE_CFG,
   updateStatus = UPDATE_STATUS,
   integrityStatus = INTEGRITY_STATUS,
@@ -1543,6 +1555,28 @@ local function handleResize(eventName, p1)
   render()
 end
 
+local function logPageValidation(pageId)
+  if not ui then
+    return
+  end
+  local label = string.lower(tostring(pageId or "unknown"))
+  local className = tostring(ui.overviewScreenClass or "unknown")
+  local key = table.concat({
+    label,
+    className,
+    tostring(ui.sw or "n/a"),
+    tostring(ui.sh or "n/a"),
+  }, "|")
+  if key ~= displayState.lastPageValidationKey then
+    appendUiRuntimeLog(
+      "page validation: " .. label
+        .. " ok size=" .. tostring(ui.sw or "n/a") .. "x" .. tostring(ui.sh or "n/a")
+        .. " class=" .. className
+    )
+    displayState.lastPageValidationKey = key
+  end
+end
+
 render = function()
   local sizeChanged = buildUI()
   if displayState.invalidScreen then
@@ -1579,8 +1613,10 @@ render = function()
     drawMicroHeader(L.header, data)
     if state.page == "MAJ" then
       drawMicroMajPage(L.body, data)
+      logPageValidation("MAJ")
     else
       drawMicroOverview(L.body, data)
+      logPageValidation("OVERVIEW")
     end
     gpu.sync()
     return
@@ -1589,6 +1625,7 @@ render = function()
   drawHeader(L.header, data)
   drawNav(L.nav)
   AppRouter.drawCurrentPage(appWiring.router, L.body, data)
+  logPageValidation(state.page)
 
   drawFooter(L.footer, data)
   gpu.sync()

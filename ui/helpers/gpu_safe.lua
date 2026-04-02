@@ -356,6 +356,16 @@ function M.drawText(args, x, y, text, color, bgColor, size, angle, options)
     return false, "gpu unavailable"
   end
 
+  local drawColor = tonumber(color)
+  if drawColor == nil then
+    drawColor = 0xFFFFFFFF
+  end
+
+  local drawBgColor = tonumber(bgColor)
+  if drawBgColor == nil then
+    drawBgColor = 0x00000000
+  end
+
   local sw, sh = resolveBounds(args, gpu)
   if not sw or not sh then
     local drawX = math.floor(tonumber(x) or 0)
@@ -366,7 +376,7 @@ function M.drawText(args, x, y, text, color, bgColor, size, angle, options)
     if drawText == "" then
       return false, "empty text"
     end
-    local ok, err = pcall(gpu.drawText, drawX, drawY, drawText, color, bgColor, drawSize, drawAngle)
+    local ok, err = pcall(gpu.drawText, drawX, drawY, drawText, drawColor, drawBgColor, drawSize, drawAngle)
     return ok, err
   end
 
@@ -449,7 +459,7 @@ function M.drawText(args, x, y, text, color, bgColor, size, angle, options)
     return false, "x outside clip"
   end
 
-  local ok, err = pcall(gpu.drawText, drawX, drawY, drawText, color, bgColor, drawSize, drawAngle)
+  local ok, err = pcall(gpu.drawText, drawX, drawY, drawText, drawColor, drawBgColor, drawSize, drawAngle)
   if not ok then
     logGpu(args, "WARN", "drawText failed", {
       x = drawX,

@@ -966,7 +966,7 @@ local lastOverviewPairAcceptedLogKey = nil
 local lastOverviewUltraDegradationLogKey = nil
 local lastOverviewCompactLowLogKey = nil
 
-function resolveOverviewVisualBounds(slotW, slotH, spacing)
+resolveOverviewVisualBounds = function(slotW, slotH, spacing)
   local sidePad = math.max(0, math.floor(spacing.sidePad or 0))
   local topPad = math.max(0, math.floor(spacing.topPad or 0))
   local bottomPad = math.max(0, math.floor(spacing.bottomPad or 0))

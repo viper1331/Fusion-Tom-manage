@@ -105,6 +105,10 @@ function M.handleAction(ctx, action)
     logWithLevel(ctx.logger, "info", "ROUTER", "assets reload requested")
 
   elseif action == "UPDATE_CHECK" then
+    logWithLevel(ctx.logger, "info", "UPDATE", "update page click handled", {
+      action = "UPDATE_CHECK",
+      page = tostring(ctx.state.page or "n/a"),
+    })
     local ok, msg = ctx.performUpdateCheck("manual")
     ctx.state.message = ok and ("MAJ CHECK -> " .. tostring(ctx.state.update.remoteStatus) .. " (" .. ctx.firstLine(msg) .. ")") or ("MAJ CHECK ERROR -> " .. ctx.firstLine(msg))
     logWithLevel(ctx.logger, ok and "info" or "warn", "ROUTER", "update check routed", {
@@ -113,6 +117,10 @@ function M.handleAction(ctx, action)
     })
 
   elseif action == "UPDATE_DOWNLOAD" then
+    logWithLevel(ctx.logger, "info", "UPDATE", "update page click handled", {
+      action = "UPDATE_DOWNLOAD",
+      page = tostring(ctx.state.page or "n/a"),
+    })
     local ok, msg = ctx.performUpdateDownload()
     ctx.state.message = ok and ("MAJ DOWNLOAD -> " .. tostring(ctx.state.update.remoteStatus) .. " (" .. ctx.firstLine(msg) .. ")") or ("MAJ DOWNLOAD ERROR -> " .. ctx.firstLine(msg))
     logWithLevel(ctx.logger, ok and "info" or "warn", "ROUTER", "update download routed", {
@@ -121,6 +129,10 @@ function M.handleAction(ctx, action)
     })
 
   elseif action == "UPDATE_APPLY" then
+    logWithLevel(ctx.logger, "info", "UPDATE", "update page click handled", {
+      action = "UPDATE_APPLY",
+      page = tostring(ctx.state.page or "n/a"),
+    })
     local ok, msg = ctx.performUpdateApply()
     ctx.state.message = ok and ("MAJ APPLY -> " .. tostring(ctx.state.update.remoteStatus) .. " (" .. ctx.firstLine(msg) .. ")") or ("MAJ APPLY ERROR -> " .. ctx.firstLine(msg))
     logWithLevel(ctx.logger, ok and "info" or "warn", "ROUTER", "update apply routed", {
@@ -129,6 +141,10 @@ function M.handleAction(ctx, action)
     })
 
   elseif action == "UPDATE_ROLLBACK" then
+    logWithLevel(ctx.logger, "info", "UPDATE", "update page click handled", {
+      action = "UPDATE_ROLLBACK",
+      page = tostring(ctx.state.page or "n/a"),
+    })
     local ok, msg = ctx.performUpdateRollback()
     ctx.state.message = ok and ("MAJ ROLLBACK -> " .. tostring(ctx.state.update.remoteStatus) .. " (" .. ctx.firstLine(msg) .. ")") or ("MAJ ROLLBACK ERROR -> " .. ctx.firstLine(msg))
     logWithLevel(ctx.logger, ok and "info" or "warn", "ROUTER", "update rollback routed", {
@@ -137,6 +153,10 @@ function M.handleAction(ctx, action)
     })
 
   elseif action == "UPDATE_RESTART" then
+    logWithLevel(ctx.logger, "info", "UPDATE", "update page click handled", {
+      action = "UPDATE_RESTART",
+      page = tostring(ctx.state.page or "n/a"),
+    })
     local ok, msg = ctx.requestProgramRestart()
     ctx.state.message = ok and ctx.firstLine(msg) or ("restart failed: " .. ctx.firstLine(msg))
     logWithLevel(ctx.logger, ok and "info" or "warn", "ROUTER", "update restart routed", {

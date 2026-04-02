@@ -11,6 +11,10 @@ function M.classifyScreen(sw, sh)
   local maxSide = math.max(width, height)
 
   -- Runtime labels are intentionally explicit to ease field diagnostics.
+  -- 4x4 block displays are 256x256 in tm_gpu field measurements.
+  if width <= 256 and height <= 256 then
+    return "ultra_compact_4x4"
+  end
   if minSide <= 170 and maxSide <= 280 then
     return "ultra_compact_4x4"
   end
