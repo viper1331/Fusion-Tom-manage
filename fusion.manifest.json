@@ -1,6 +1,6 @@
 {
     "name":  "Fusion-Tom-manage",
-    "version":  "1.2.48",
+    "version":  "1.2.49",
     "channel":  "stable",
     "entrypoint":  "start.lua",
     "source":  {
@@ -8,7 +8,7 @@
                    "repo":  "Fusion-Tom-manage",
                    "branch":  "main",
                    "manifestPath":  "fusion.manifest.json",
-                   "commit":  "69ba574d796eb5765b7c09a6efc3996687294dfa"
+                   "commit":  "532d7864b5912f863b6aea10f44c563bc05e711f"
                },
     "integrity":  {
                       "mode":  "hash+size",
@@ -41,7 +41,7 @@
                   {
                       "path":  "fusion.version",
                       "size":  7,
-                      "hash":  "6e7bddb0088a83e08b0cbf200d0d7673dbb44a869529cc21b274b319cec29c90",
+                      "hash":  "02004d8ca7e475a692a73952a7e9e2a93d1e780cb3cc43e6fe90ed90f7c45cb1",
                       "hashAlgo":  "sha256"
                   },
                   {
@@ -328,8 +328,8 @@
                   },
                   {
                       "path":  "ui/helpers/overview_scene_runtime.lua",
-                      "size":  54645,
-                      "hash":  "cddd6ac02db75acfad8875edb1ad2d91f01f75d88f14056f6ea0f1d6f03a8778",
+                      "size":  54794,
+                      "hash":  "e0f1590ba6dad43a2605e10b080cda133beccbf31580b32aabb6a0a67b9dda4a",
                       "hashAlgo":  "sha256"
                   },
                   {
@@ -345,5 +345,5 @@
                       "hashAlgo":  "sha256"
                   }
               ],
-    "commit":  "69ba574d796eb5765b7c09a6efc3996687294dfa"
+    "commit":  "532d7864b5912f863b6aea10f44c563bc05e711f"
 }
