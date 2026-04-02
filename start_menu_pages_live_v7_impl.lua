@@ -1559,7 +1559,16 @@ local function logPageValidation(pageId)
   if not ui then
     return
   end
-  local label = string.lower(tostring(pageId or "unknown"))
+  local raw = string.upper(tostring(pageId or "unknown"))
+  local labelMap = {
+    OVERVIEW = "overview",
+    CONTROL = "control",
+    FUEL = "fuel",
+    SYSTEM = "system",
+    MAJ = "update",
+    UPDATE = "update",
+  }
+  local label = labelMap[raw] or string.lower(raw)
   local className = tostring(ui.overviewScreenClass or "unknown")
   local key = table.concat({
     label,

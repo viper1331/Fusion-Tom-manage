@@ -1,5 +1,6 @@
 local M = {}
 local throttleFallback = {}
+local drawTextSignatureMode = "auto"
 
 local function nowMs()
   if os.epoch then
@@ -75,16 +76,25 @@ local function resolveBounds(args, gpu)
   end
 
   local ui = args and args.ui
+  local okSize, rawSw, rawSh = pcall(g.getSize)
+  local gpuSw = (okSize and type(rawSw) == "number") and math.max(1, math.floor(rawSw)) or nil
+  local gpuSh = (okSize and type(rawSh) == "number") and math.max(1, math.floor(rawSh)) or nil
+
   if ui and type(ui.sw) == "number" and type(ui.sh) == "number" then
-    return math.max(1, math.floor(ui.sw)), math.max(1, math.floor(ui.sh))
+    local uiSw = math.max(1, math.floor(ui.sw))
+    local uiSh = math.max(1, math.floor(ui.sh))
+    if gpuSw and gpuSh then
+      -- Prefer the conservative bound to avoid stale-resize out-of-bound draws.
+      return math.max(1, math.min(uiSw, gpuSw)), math.max(1, math.min(uiSh, gpuSh))
+    end
+    return uiSw, uiSh
   end
 
-  local ok, sw, sh = pcall(g.getSize)
-  if not ok or type(sw) ~= "number" or type(sh) ~= "number" then
+  if not gpuSw or not gpuSh then
     return nil, nil
   end
 
-  return math.max(1, math.floor(sw)), math.max(1, math.floor(sh))
+  return gpuSw, gpuSh
 end
 
 local function clipRect(x, y, w, h, sw, sh)
@@ -237,6 +247,47 @@ local function fitTextToWidth(gpu, text, size, angle, maxWidth)
   return out
 end
 
+local function callGpuDrawText(args, gpu, drawX, drawY, drawText, drawColor, drawBgColor, drawSize, drawAngle)
+  local function callWithBg()
+    return pcall(gpu.drawText, drawX, drawY, drawText, drawColor, drawBgColor, drawSize, drawAngle)
+  end
+
+  local function callNoBg()
+    return pcall(gpu.drawText, drawX, drawY, drawText, drawColor, drawSize, drawAngle)
+  end
+
+  if drawTextSignatureMode == "no_bg" then
+    return callNoBg()
+  end
+  if drawTextSignatureMode == "with_bg" then
+    return callWithBg()
+  end
+
+  local ok, err = callWithBg()
+  if ok then
+    drawTextSignatureMode = "with_bg"
+    return ok, err
+  end
+
+  local errText = string.lower(tostring(err or ""))
+  local badArg5 = string.find(errText, "argument #5", 1, true) ~= nil
+  local badArg6 = string.find(errText, "argument #6", 1, true) ~= nil
+  local badArg7 = string.find(errText, "argument #7", 1, true) ~= nil
+  if badArg5 or badArg6 or badArg7 then
+    local okNoBg, errNoBg = callNoBg()
+    if okNoBg then
+      drawTextSignatureMode = "no_bg"
+      logGpu(args, "INFO", "drawText signature fallback applied", {
+        signature = "no_bg",
+      }, "gpu.drawText.signature.no_bg", 60000)
+      return okNoBg, errNoBg
+    end
+    return okNoBg, errNoBg
+  end
+
+  return ok, err
+end
+
 function M.filledRect(args, x, y, w, h, color)
   local gpu = args and args.gpu
   if not gpu then
@@ -376,7 +427,7 @@ function M.drawText(args, x, y, text, color, bgColor, size, angle, options)
     if drawText == "" then
       return false, "empty text"
     end
-    local ok, err = pcall(gpu.drawText, drawX, drawY, drawText, drawColor, drawBgColor, drawSize, drawAngle)
+    local ok, err = callGpuDrawText(args, gpu, drawX, drawY, drawText, drawColor, drawBgColor, drawSize, drawAngle)
     return ok, err
   end
 
@@ -459,7 +510,7 @@ function M.drawText(args, x, y, text, color, bgColor, size, angle, options)
     return false, "x outside clip"
   end
 
-  local ok, err = pcall(gpu.drawText, drawX, drawY, drawText, drawColor, drawBgColor, drawSize, drawAngle)
+  local ok, err = callGpuDrawText(args, gpu, drawX, drawY, drawText, drawColor, drawBgColor, drawSize, drawAngle)
   if not ok then
     logGpu(args, "WARN", "drawText failed", {
       x = drawX,
