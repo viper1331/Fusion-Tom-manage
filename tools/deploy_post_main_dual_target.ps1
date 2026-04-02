@@ -312,14 +312,19 @@ function Send-Command {
     throw "CONFIG::write_command introuvable: $WriteScriptPath"
   }
 
-  $args = @("-Command", $CommandName, "-Computer", $Computer)
+  $invokeArgs = @{
+    Command = $CommandName
+    Computer = $Computer
+  }
   if ((Normalize-Text -Value $ExpectedVersion) -ne "") {
-    $args += @("-ExpectedVersion", $ExpectedVersion)
+    $invokeArgs.ExpectedVersion = $ExpectedVersion
   }
 
-  $output = & $WriteScriptPath @args 2>&1
-  if ($LASTEXITCODE -ne 0) {
-    $details = ($output | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+  $output = $null
+  try {
+    $output = & $WriteScriptPath @invokeArgs 2>&1
+  } catch {
+    $details = if ($output) { ($output | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine } else { $_.Exception.Message }
     throw "RUNTIME::write_command failed for $Computer`n$details"
   }
 
