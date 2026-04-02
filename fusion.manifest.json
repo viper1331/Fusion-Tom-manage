@@ -1,6 +1,6 @@
 {
     "name":  "Fusion-Tom-manage",
-    "version":  "1.2.52",
+    "version":  "1.2.53",
     "channel":  "stable",
     "entrypoint":  "start.lua",
     "source":  {
@@ -8,7 +8,7 @@
                    "repo":  "Fusion-Tom-manage",
                    "branch":  "main",
                    "manifestPath":  "fusion.manifest.json",
-                   "commit":  "fd7c518ec24e2bab37c6b9fed3d5e6efbc0f262c"
+                   "commit":  "f6c16d87657aca8577fccd5090336ef98f96c934"
                },
     "integrity":  {
                       "mode":  "hash+size",
@@ -41,7 +41,7 @@
                   {
                       "path":  "fusion.version",
                       "size":  7,
-                      "hash":  "2238ac8d008e6f8e9aeb4078dd9673906f64d5494ba15fe3e16cf63d34dd31b3",
+                      "hash":  "c1a6175087f3cd84c56d92a9ef15370e0af7cb3a99d57a540a1745dcc94f4e3d",
                       "hashAlgo":  "sha256"
                   },
                   {
@@ -196,14 +196,14 @@
                   },
                   {
                       "path":  "ui/helpers/layout.lua",
-                      "size":  1595,
-                      "hash":  "103c0ae7f7345c118a7d696d56200987ff2fb6aa3fcc3ffb387e7832e98e9d97",
+                      "size":  1750,
+                      "hash":  "08a7348141fa4e5e928353614b5c42f5473b8aee33627e4b27fa03a2c930ba4b",
                       "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "ui/helpers/gpu_safe.lua",
-                      "size":  14013,
-                      "hash":  "0263023910e2acd7b5944535f14e3748d7c8d5b921bba3e3c39ca8e791ee943f",
+                      "size":  15695,
+                      "hash":  "42edd10c58863562769065c195ba1e3e60bc64a325d5ea71093ad5ee32e33d83",
                       "hashAlgo":  "sha256"
                   },
                   {
@@ -280,8 +280,8 @@
                   },
                   {
                       "path":  "start_menu_pages_live_v7_impl.lua",
-                      "size":  51784,
-                      "hash":  "9eebd87e5e039d9155dfa1d98fdeb56a16091f25960132dccc1442eda4b99785",
+                      "size":  51995,
+                      "hash":  "79739a69b9febe7d6f7db7c37c530383dfb45baef4818a37c2fe1d1c81b51a83",
                       "hashAlgo":  "sha256"
                   },
                   {
@@ -345,5 +345,5 @@
                       "hashAlgo":  "sha256"
                   }
               ],
-    "commit":  "fd7c518ec24e2bab37c6b9fed3d5e6efbc0f262c"
+    "commit":  "f6c16d87657aca8577fccd5090336ef98f96c934"
 }
