@@ -39,6 +39,7 @@ local function logOverviewViewport(args, zones, imgW, imgH)
     renderedMode = layout.module and "pair" or "reactor-only"
   end
   local drawnCount = layout and layout.drawnModuleCount or 0
+  local layoutReason = layout and (layout.fallbackReason or layout.selectionReason or layout.selectionClass) or "n/a"
 
   local key = table.concat({
     mode,
@@ -50,6 +51,7 @@ local function logOverviewViewport(args, zones, imgW, imgH)
     tostring(reactorName),
     tostring(moduleName),
     tostring(drawnCount),
+    tostring(layoutReason),
   }, "|")
 
   if key ~= lastViewportLogKey then
@@ -62,6 +64,7 @@ local function logOverviewViewport(args, zones, imgW, imgH)
         .. " reactor=" .. tostring(reactorName)
         .. " module=" .. tostring(moduleName)
         .. " modulesDrawn=" .. tostring(drawnCount)
+        .. " reason=" .. tostring(layoutReason)
     )
     lastViewportLogKey = key
   end

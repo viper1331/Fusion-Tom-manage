@@ -541,7 +541,16 @@ local ui = nil
 local displayState = {
   lastWidth = -1,
   lastHeight = -1,
+  invalidScreen = false,
+  lastInvalidScreenKey = nil,
+  lastInvalidViewportKey = nil,
+  lastInvalidRenderKey = nil,
 }
+
+local MIN_VALID_SCREEN_W = 96
+local MIN_VALID_SCREEN_H = 180
+local MIN_VALID_VIEWPORT_W = 48
+local MIN_VALID_VIEWPORT_H = 72
 
 local PAGES = {
   { id = "OVERVIEW", label = "OVERVIEW" },
@@ -872,6 +881,40 @@ local function estimateOverviewSceneViewport()
   local innerW = mainW - ui.pad * 2 - 2
   local innerH = mainH - sv(40) - 2
   return math.max(8, innerW), math.max(8, innerH)
+end
+
+local function screenSizeRejectReason(sw, sh)
+  local width = tonumber(sw) or 0
+  local height = tonumber(sh) or 0
+
+  if width <= 0 or height <= 0 then
+    return "invalid_dimensions"
+  end
+
+  return nil
+end
+
+local function assetReloadScreenRejectReason(sw, sh)
+  local width = tonumber(sw) or 0
+  local height = tonumber(sh) or 0
+  if width < MIN_VALID_SCREEN_W or height < MIN_VALID_SCREEN_H then
+    return "screen_too_small_for_assets"
+  end
+  return nil
+end
+
+local function viewportRejectReason(viewportW, viewportH)
+  local width = tonumber(viewportW) or 0
+  local height = tonumber(viewportH) or 0
+
+  if width <= 0 or height <= 0 then
+    return "invalid_viewport"
+  end
+  if width < MIN_VALID_VIEWPORT_W or height < MIN_VALID_VIEWPORT_H then
+    return "viewport_too_small_for_assets"
+  end
+
+  return nil
 end
 
 local function buildTierVariantMap(variants, kindLabel)
@@ -1357,6 +1400,8 @@ end
 
 local function tryLoadAssets(reason)
   reason = tostring(reason or "manual")
+  local screenW = ui and ui.sw or 0
+  local screenH = ui and ui.sh or 0
   local screen = tostring(ui and (ui.sw .. "x" .. ui.sh) or "n/a")
   local hadPreviousReactor = (#images.reactorVariants > 0) or (images.reactor ~= nil)
   local hadPreviousModule = (#images.laserModuleVariants > 0) or (images.laserModule ~= nil)
@@ -1365,6 +1410,41 @@ local function tryLoadAssets(reason)
   local previousModule = hadPreviousModule and tostring(state.visual.moduleAsset or "runtime") or "none"
   local requestedTier = preferredSceneTier()
   local viewportW, viewportH = estimateOverviewSceneViewport()
+  local rejectReason = screenSizeRejectReason(screenW, screenH)
+    or assetReloadScreenRejectReason(screenW, screenH)
+    or viewportRejectReason(viewportW, viewportH)
+
+  if rejectReason then
+    local rejectKey = table.concat({
+      tostring(screenW),
+      tostring(screenH),
+      tostring(viewportW or "n/a"),
+      tostring(viewportH or "n/a"),
+      tostring(rejectReason),
+      tostring(hadPreviousVisual and "preserve" or "none"),
+    }, "|")
+    if rejectKey ~= displayState.lastInvalidViewportKey then
+      appendUiRuntimeLog(
+        "asset reload skipped: reason=" .. tostring(rejectReason)
+          .. " screen=" .. tostring(screenW) .. "x" .. tostring(screenH)
+          .. " viewport=" .. tostring(viewportW or "n/a") .. "x" .. tostring(viewportH or "n/a")
+          .. " preservePrevious=" .. tostring(hadPreviousVisual and "yes" or "no")
+      )
+      displayState.lastInvalidViewportKey = rejectKey
+    end
+
+    if hadPreviousVisual then
+      state.visual.sceneMode = hadPreviousModule and "pair" or "reactor-only"
+      state.visual.lastAssetReason = reason .. ":skip_invalid_viewport"
+      state.visual.vramFallback = state.visual.vramFallback or false
+    else
+      state.visual.lastAssetReason = reason .. ":skip_invalid_viewport_no_scene"
+    end
+    refreshVisualEffectLevel()
+    return false, rejectReason
+  end
+
+  displayState.lastInvalidViewportKey = nil
 
   appendUiRuntimeLog(
     "asset reload start: reason=" .. reason
@@ -1446,6 +1526,7 @@ local function tryLoadAssets(reason)
 
   refreshVisualEffectLevel()
   pcall(collectgarbage, "collect")
+  return scene ~= nil, loadErr
 end
 
 local function getFallbackReactorVariant()
@@ -1522,13 +1603,16 @@ local function shouldReplaceLayoutCandidate(current, candidate)
   return (candidate.requiredW or 0) < (current.requiredW or 0)
 end
 
-local function chooseStackLayout(slotW, slotH, moduleCount)
+local function chooseStackLayout(slotW, slotH, moduleCount, options)
+  options = type(options) == "table" and options or {}
   local spacing = resolveOverviewStackSpacing()
   local visual = resolveOverviewVisualBounds(slotW, slotH, spacing)
   local gap = spacing.reactorGap
   local moduleGap = spacing.moduleGap
-  local bestCapped = nil
-  local bestFit = nil
+  local bestPairCapped = nil
+  local bestPairFit = nil
+  local bestReactorCapped = nil
+  local bestReactorFit = nil
   local visualReject = nil
   local hardReject = nil
 
@@ -1550,6 +1634,25 @@ local function chooseStackLayout(slotW, slotH, moduleCount)
     end
   end
 
+  local function isPairCandidate(candidate)
+    return candidate and candidate.module ~= nil and (tonumber(candidate.moduleCount) or 0) > 0
+  end
+
+  local function annotateSelection(candidate, selectionClass, selectionReason)
+    if candidate then
+      candidate.selectionClass = selectionClass
+      candidate.selectionReason = selectionReason
+    end
+    return candidate
+  end
+
+  local function mergeBestCandidate(current, candidate)
+    if shouldReplaceLayoutCandidate(current, candidate) then
+      return candidate
+    end
+    return current
+  end
+
   local function registerCandidate(candidate)
     local fitsAvailable = candidate.requiredW <= visual.availableW and candidate.requiredH <= visual.availableH
     if not fitsAvailable then
@@ -1561,14 +1664,18 @@ local function chooseStackLayout(slotW, slotH, moduleCount)
 
     local withinCap = candidate.fillW <= visual.maxWFill and candidate.fillH <= visual.maxHFill
     if withinCap then
-      if shouldReplaceLayoutCandidate(bestCapped, candidate) then
-        bestCapped = candidate
+      if isPairCandidate(candidate) then
+        bestPairCapped = mergeBestCandidate(bestPairCapped, candidate)
+      else
+        bestReactorCapped = mergeBestCandidate(bestReactorCapped, candidate)
       end
       return
     end
 
-    if shouldReplaceLayoutCandidate(bestFit, candidate) then
-      bestFit = candidate
+    if isPairCandidate(candidate) then
+      bestPairFit = mergeBestCandidate(bestPairFit, candidate)
+    else
+      bestReactorFit = mergeBestCandidate(bestReactorFit, candidate)
     end
     if (not visualReject) or (candidate.fillW + candidate.fillH > visualReject.fillW + visualReject.fillH) then
       visualReject = candidate
@@ -1632,8 +1739,71 @@ local function chooseStackLayout(slotW, slotH, moduleCount)
     end
   end
 
+  local bestCapped = mergeBestCandidate(bestReactorCapped, bestPairCapped)
+  local bestFit = mergeBestCandidate(bestReactorFit, bestPairFit)
+  local preferPair = options.preferPair == true
+  local responsiveMode = tostring(options.responsiveMode or (ui and (ui.micro and "micro" or (ui.compact and "compact" or "large")) or "large")
+
+  if preferPair then
+    if bestPairCapped then
+      return annotateSelection(bestPairCapped, "pair_capped", "pair_available")
+    end
+
+    if bestPairFit then
+      local visualLogKey = table.concat({
+        tostring(slotW),
+        tostring(slotH),
+        tostring(visual.availableW),
+        tostring(visual.availableH),
+        tostring(bestPairFit.requiredW),
+        tostring(bestPairFit.requiredH),
+        tostring(bestPairFit.reactor and bestPairFit.reactor.name or "none"),
+        tostring(bestPairFit.module and bestPairFit.module.name or "none"),
+        "prefer_pair",
+      }, "|")
+      if visualLogKey ~= lastLayoutVisualRejectLogKey then
+        appendUiRuntimeLog(
+          "layout fallback selected: class=visual_margin_cap"
+            .. " strategy=prefer_pair"
+            .. " mode=" .. tostring(responsiveMode)
+            .. " slot=" .. tostring(slotW) .. "x" .. tostring(slotH)
+            .. " availableViewport=" .. tostring(visual.availableW) .. "x" .. tostring(visual.availableH)
+            .. " required=" .. tostring(bestPairFit.requiredW) .. "x" .. tostring(bestPairFit.requiredH)
+            .. " fillW=" .. string.format("%.2f", bestPairFit.fillW or 0)
+            .. " fillH=" .. string.format("%.2f", bestPairFit.fillH or 0)
+            .. " cap=" .. tostring(visual.maxWFill) .. "," .. tostring(visual.maxHFill)
+        )
+        lastLayoutVisualRejectLogKey = visualLogKey
+      end
+      return annotateSelection(bestPairFit, "pair_visual_margin_cap", "pair_preferred_over_cap")
+    end
+
+    if bestReactorCapped then
+      local fallbackLogKey = table.concat({
+        tostring(slotW),
+        tostring(slotH),
+        tostring(bestReactorCapped.reactor and bestReactorCapped.reactor.name or "none"),
+        "pair_unavailable",
+      }, "|")
+      if fallbackLogKey ~= lastLayoutFallbackLogKey then
+        appendUiRuntimeLog(
+          "layout fallback: reactor-only selected"
+            .. " mode=" .. tostring(responsiveMode)
+            .. " slot=" .. tostring(slotW) .. "x" .. tostring(slotH)
+            .. " reason=pair_unavailable"
+        )
+        lastLayoutFallbackLogKey = fallbackLogKey
+      end
+      return annotateSelection(bestReactorCapped, "reactor_capped", "pair_unavailable")
+    end
+
+    if bestReactorFit then
+      return annotateSelection(bestReactorFit, "reactor_visual_margin_cap", "pair_unavailable_visual_cap")
+    end
+  end
+
   if bestCapped then
-    return bestCapped
+    return annotateSelection(bestCapped, isPairCandidate(bestCapped) and "pair_capped" or "reactor_capped", "default_selection")
   end
 
   if bestFit then
@@ -1659,7 +1829,7 @@ local function chooseStackLayout(slotW, slotH, moduleCount)
       )
       lastLayoutVisualRejectLogKey = visualLogKey
     end
-    return bestFit
+    return annotateSelection(bestFit, isPairCandidate(bestFit) and "pair_visual_margin_cap" or "reactor_visual_margin_cap", "visual_margin_cap")
   end
 
   local fallbackReactor = getFallbackReactorVariant()
@@ -1686,7 +1856,7 @@ local function chooseStackLayout(slotW, slotH, moduleCount)
       )
       lastLayoutFallbackLogKey = fallbackLogKey
     end
-    return {
+    return annotateSelection({
       reactor = fallbackReactor,
       module = nil,
       moduleCount = 0,
@@ -1705,7 +1875,7 @@ local function chooseStackLayout(slotW, slotH, moduleCount)
       sidePad = visual.sidePad,
       availableW = visual.availableW,
       availableH = visual.availableH,
-    }
+    }, "reactor_only_fallback", "visual_margin_cap")
   elseif fallbackReactor then
     local rejectLogKey = table.concat({
       tostring(slotW),
@@ -1777,9 +1947,13 @@ end
 local function chooseOverviewStackLayout(slotW, slotH, configuredModuleCount)
   local maxCount = math.max(1, tonumber(configuredModuleCount) or 1)
   local reactorOnlyFallback = nil
+  local responsiveMode = ui and (ui.micro and "micro" or (ui.compact and "compact" or "large")) or "large"
 
-  for count = maxCount, 0, -1 do
-    local layout = chooseStackLayout(slotW, slotH, count)
+  for count = maxCount, 1, -1 do
+    local layout = chooseStackLayout(slotW, slotH, count, {
+      preferPair = true,
+      responsiveMode = responsiveMode,
+    })
     if layout and layout.reactor then
       layout.configuredModuleCount = maxCount
       layout.drawnModuleCount = layout.module and count or 0
@@ -1810,12 +1984,45 @@ local function chooseOverviewStackLayout(slotW, slotH, configuredModuleCount)
       end
 
       if not reactorOnlyFallback then
+        layout.fallbackReason = layout.selectionReason or "pair_unavailable"
         reactorOnlyFallback = layout
       end
     end
   end
 
+  if not reactorOnlyFallback then
+    local fallbackLayout = chooseStackLayout(slotW, slotH, 0, {
+      preferPair = false,
+      responsiveMode = responsiveMode,
+    })
+    if fallbackLayout and fallbackLayout.reactor then
+      fallbackLayout.configuredModuleCount = maxCount
+      fallbackLayout.drawnModuleCount = 0
+      fallbackLayout.fallbackReason = fallbackLayout.selectionReason or "reactor_only_layout"
+      reactorOnlyFallback = fallbackLayout
+    end
+  end
+
   if reactorOnlyFallback then
+    local fallbackKey = table.concat({
+      tostring(slotW),
+      tostring(slotH),
+      tostring(maxCount),
+      tostring(reactorOnlyFallback.reactor and reactorOnlyFallback.reactor.name or "none"),
+      tostring(reactorOnlyFallback.fallbackReason or "pair_unavailable"),
+      tostring(responsiveMode),
+    }, "|")
+    if fallbackKey ~= lastLayoutFallbackLogKey then
+      appendUiRuntimeLog(
+        "overview layout fallback: mode=reactor-only"
+          .. " responsiveMode=" .. tostring(responsiveMode)
+          .. " reason=" .. tostring(reactorOnlyFallback.fallbackReason or "pair_unavailable")
+          .. " configuredModules=" .. tostring(maxCount)
+          .. " drawnModules=0"
+          .. " slot=" .. tostring(slotW) .. "x" .. tostring(slotH)
+      )
+      lastLayoutFallbackLogKey = fallbackKey
+    end
     return reactorOnlyFallback
   end
 
@@ -1941,6 +2148,29 @@ local function buildUI()
   gpu.setSize(GPU_MODE)
 
   local sw, sh = gpu.getSize()
+  local rejectReason = screenSizeRejectReason(sw, sh)
+  if rejectReason then
+    displayState.invalidScreen = true
+    local invalidKey = table.concat({
+      tostring(sw),
+      tostring(sh),
+      tostring(rejectReason),
+    }, "|")
+    if invalidKey ~= displayState.lastInvalidScreenKey then
+      appendUiRuntimeLog(
+        "screen size rejected: "
+          .. tostring(sw) .. "x" .. tostring(sh)
+          .. " reason=" .. tostring(rejectReason)
+          .. " action=skip_asset_reload_preserve_scene"
+      )
+      displayState.lastInvalidScreenKey = invalidKey
+    end
+    return false
+  end
+
+  displayState.invalidScreen = false
+  displayState.lastInvalidScreenKey = nil
+  displayState.lastInvalidRenderKey = nil
   local sizeChanged = (sw ~= displayState.lastWidth) or (sh ~= displayState.lastHeight)
   if sizeChanged then
     appendUiRuntimeLog("screen size detected: " .. tostring(sw) .. "x" .. tostring(sh))
@@ -3618,6 +3848,15 @@ end
 local function handleResize(eventName, p1)
   local previousSize = state.visual.screenSize
   local sizeChanged = buildUI()
+  if displayState.invalidScreen then
+    appendUiRuntimeLog(
+      "resize event: " .. tostring(eventName)
+        .. " rejected (invalid screen size), keeping previous scene="
+        .. tostring(state.visual.sceneMode or "none")
+    )
+    state.message = "resize pending: invalid screen size"
+    return
+  end
   if sizeChanged then
     appendUiRuntimeLog("resize event: " .. tostring(eventName) .. " (" .. tostring(p1 or "n/a") .. ") " .. tostring(previousSize) .. " -> " .. tostring(state.visual.screenSize))
     tryLoadAssets("event:" .. tostring(eventName))
@@ -3630,6 +3869,14 @@ end
 
 render = function()
   local sizeChanged = buildUI()
+  if displayState.invalidScreen then
+    local invalidKey = tostring(displayState.lastInvalidScreenKey or "invalid")
+    if invalidKey ~= displayState.lastInvalidRenderKey then
+      appendUiRuntimeLog("render skipped: invalid screen size state detected")
+      displayState.lastInvalidRenderKey = invalidKey
+    end
+    return
+  end
   if sizeChanged then
     tryLoadAssets("auto-resize:" .. tostring(state.visual.screenSize))
     state.message = "screen resized: " .. tostring(state.visual.screenSize)

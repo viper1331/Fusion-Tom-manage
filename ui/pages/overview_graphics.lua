@@ -493,7 +493,10 @@ function M.drawImageStack(args)
   local layout = forcedLayout
   if not layout or not layout.reactor then
     -- Pair scene remains preferred. chooseStackLayout already ranks pair over reactor-only.
-    layout = chooseStackLayout(slotW, slotH, configuredModuleCount)
+    layout = chooseStackLayout(slotW, slotH, configuredModuleCount, {
+      preferPair = sceneMode == "pair",
+      responsiveMode = responsiveMode,
+    })
   end
 
   if (not layout or not layout.reactor)
@@ -506,6 +509,7 @@ function M.drawImageStack(args)
       moduleCount = 0,
       configuredModuleCount = configuredModuleCount,
       drawnModuleCount = 0,
+      fallbackReason = "renderer_fallback_reactor_only",
       moduleGap = stackCalibration.moduleGap,
       reactorGap = stackCalibration.reactorGap,
       stackOffsetY = stackCalibration.stackOffsetY,
@@ -569,6 +573,19 @@ function M.drawImageStack(args)
   )
 
   if not layout or not layout.reactor then
+    if sceneMode == "pair" then
+      appendRuntimeLogOnce(
+        args,
+        "overview_pair_layout_missing",
+        table.concat({
+          tostring(slotW),
+          tostring(slotH),
+          tostring(reactorPresent),
+          tostring(laserPresent),
+        }, "|"),
+        "overview layout fallback: requestedSceneMode=pair renderedSceneMode=none reason=no_reactor_layout"
+      )
+    end
     local missingKey = table.concat({
       tostring(sceneMode),
       tostring(reactorPresent),
@@ -687,6 +704,32 @@ function M.drawImageStack(args)
   )
 
   local renderedMode = moduleVariant and drawnModuleCount > 0 and "pair" or "reactor-only"
+  if sceneMode == "pair" and renderedMode ~= "pair" then
+    local fallbackReason = tostring(layout and (layout.fallbackReason or layout.selectionReason or layout.selectionClass) or "layout_without_pair")
+    local fallbackKey = table.concat({
+      tostring(sceneMode),
+      tostring(renderedMode),
+      tostring(slotW),
+      tostring(slotH),
+      tostring(configuredCount),
+      tostring(drawnModuleCount),
+      fallbackReason,
+      tostring(responsiveMode),
+    }, "|")
+    appendRuntimeLogOnce(
+      args,
+      "overview_pair_to_reactor_fallback",
+      fallbackKey,
+      "overview layout fallback:"
+        .. " requestedSceneMode=pair"
+        .. " renderedSceneMode=" .. tostring(renderedMode)
+        .. " reason=" .. fallbackReason
+        .. " responsiveMode=" .. tostring(responsiveMode)
+        .. " configuredModules=" .. tostring(configuredCount)
+        .. " drawnModules=" .. tostring(drawnModuleCount)
+        .. " viewport=" .. tostring(viewW) .. "x" .. tostring(viewH)
+    )
+  end
   local fillW = totalW / math.max(1, viewW)
   local fillH = totalH / math.max(1, viewH)
   local renderedKey = table.concat({
