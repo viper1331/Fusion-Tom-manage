@@ -50,6 +50,7 @@ return {
     enabled = false,
     collectorBaseUrl = "http://127.0.0.1:8765",
     pollSeconds = 5,
+    runtimeMode = "runtime_gated",
     computerName = "",
     autoStart = true,
     commandAckEndpoint = "/command/ack",

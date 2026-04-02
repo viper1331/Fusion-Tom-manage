@@ -45,15 +45,22 @@ local function resolveTerrainAgentConfig()
   if cfg.autoStart == nil then
     cfg.autoStart = true
   end
+  local mode = string.lower(tostring(cfg.runtimeMode or ""))
+  if mode ~= "daemon" and mode ~= "runtime_gated" then
+    mode = "runtime_gated"
+  end
+  cfg.runtimeMode = mode
   return cfg
 end
 
 if fs.exists("terrain/boot.lua") then
   local cfg = resolveTerrainAgentConfig()
-  appendTerrainStartupLog("startup: terrain boot present, enabled=" .. tostring(cfg.enabled) .. " autoStart=" .. tostring(cfg.autoStart))
-  if cfg.enabled == true and cfg.autoStart ~= false and shell and type(shell.run) == "function" then
+  appendTerrainStartupLog("startup: terrain boot present, enabled=" .. tostring(cfg.enabled) .. " autoStart=" .. tostring(cfg.autoStart) .. " mode=" .. tostring(cfg.runtimeMode))
+  if cfg.enabled == true and cfg.autoStart ~= false and cfg.runtimeMode == "daemon" and shell and type(shell.run) == "function" then
     local ok, err = pcall(shell.run, "terrain/boot.lua")
     appendTerrainStartupLog("startup: terrain boot launch=" .. tostring(ok) .. (ok and "" or (" err=" .. tostring(err))))
+  elseif cfg.enabled == true and cfg.runtimeMode == "runtime_gated" then
+    appendTerrainStartupLog("startup: runtime-gated mode, boot daemon deferred to start.lua runtime")
   else
     appendTerrainStartupLog("startup: terrain daemon not launched")
   end
