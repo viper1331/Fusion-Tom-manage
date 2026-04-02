@@ -1742,7 +1742,7 @@ local function chooseStackLayout(slotW, slotH, moduleCount, options)
   local bestCapped = mergeBestCandidate(bestReactorCapped, bestPairCapped)
   local bestFit = mergeBestCandidate(bestReactorFit, bestPairFit)
   local preferPair = options.preferPair == true
-  local responsiveMode = tostring(options.responsiveMode or (ui and (ui.micro and "micro" or (ui.compact and "compact" or "large")) or "large")
+  local responsiveMode = tostring(options.responsiveMode or (ui and (ui.micro and "micro" or (ui.compact and "compact" or "large")) or "large"))
 
   if preferPair then
     if bestPairCapped then
