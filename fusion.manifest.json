@@ -1,6 +1,6 @@
 {
     "name":  "Fusion-Tom-manage",
-    "version":  "1.2.55",
+    "version":  "1.2.62",
     "channel":  "stable",
     "entrypoint":  "start.lua",
     "source":  {
@@ -8,7 +8,7 @@
                    "repo":  "Fusion-Tom-manage",
                    "branch":  "main",
                    "manifestPath":  "fusion.manifest.json",
-                   "commit":  "46108e86f3e25751d373b4fb58f3e8b5b9cb7474"
+                   "commit":  "cdea7bd80723a5fc9987c484f3b62c32054cbfd2"
                },
     "integrity":  {
                       "mode":  "hash+size",
@@ -28,20 +28,20 @@
                   },
                   {
                       "path":  "install.lua",
-                      "size":  11214,
-                      "hash":  "e82fbe94d1454d22584e93fc8a762a2699887eeed658911b06e76a589b674314",
+                      "size":  13081,
+                      "hash":  "22551ee46f2762509df6d7697b90c87c2eda0b6c1ad2870733aa6752b50591e7",
                       "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "fusion_config.lua",
-                      "size":  1504,
-                      "hash":  "7cca554d4ad5978f98af40b2bd7cb8aab393f5c4fb3bf092ca4138a42d183120",
+                      "size":  1863,
+                      "hash":  "9fa670f87cd4c6454676a99b25bf6113afbd4c1a9a7d378ad528cbb80c30caeb",
                       "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "fusion.version",
-                      "size":  7,
-                      "hash":  "86142beb5be2a3ef9eb8532ddf840a24b7a39ca61d46e6985b965557234c94ce",
+                      "size":  6,
+                      "hash":  "93997bb96ee6ae3c94a01f81bb9a02256b59ac0b7fb226f132feee74d3a9f6a1",
                       "hashAlgo":  "sha256"
                   },
                   {
@@ -274,8 +274,8 @@
                   },
                   {
                       "path":  "start.lua",
-                      "size":  203,
-                      "hash":  "8a2a2323753b2ff2ec53c415e9d7f9221196a819145f1b87fe1b6d86a1eb684e",
+                      "size":  343,
+                      "hash":  "00ef93397f81940f9b5601df92422a78f46340e4a6762a9d54f8506b264c3840",
                       "hashAlgo":  "sha256"
                   },
                   {
@@ -343,7 +343,103 @@
                       "size":  2816,
                       "hash":  "54082f3d2ac3bf9867b072dafaab09268eb3ac41187f941b12c2b29a426704ca",
                       "hashAlgo":  "sha256"
+                  },
+                  {
+                      "path":  "startup.lua",
+                      "size":  2315,
+                      "hash":  "c069cff0b7bbf0b44a6b430dbe7d2c2811522dfc7f38164416f6c06a938ca192",
+                      "hashAlgo":  "sha256"
+                  },
+                  {
+                      "path":  "core/update/orchestrator.lua",
+                      "size":  10520,
+                      "hash":  "f03b4550c90ff9b704afd1d8dc7099c1b59679326a2372c13d0820788101242e",
+                      "hashAlgo":  "sha256"
+                  },
+                  {
+                      "path":  "bin/update_check.lua",
+                      "size":  557,
+                      "hash":  "871e4576a4d226a60537813001477ffc503e51c52d134804f3073d06d7c3d76c",
+                      "hashAlgo":  "sha256"
+                  },
+                  {
+                      "path":  "bin/update_sync.lua",
+                      "size":  555,
+                      "hash":  "eac60a022b224264e3b9d9f82eba14b8cd7a4da4dd0e1e4ea9a7339f2eb7731a",
+                      "hashAlgo":  "sha256"
+                  },
+                  {
+                      "path":  "bin/update_apply.lua",
+                      "size":  557,
+                      "hash":  "809038ceb2517bd390798a66ad2a3882d4b583878043c57c115d7990d5376a05",
+                      "hashAlgo":  "sha256"
+                  },
+                  {
+                      "path":  "bin/update_rollback.lua",
+                      "size":  563,
+                      "hash":  "3a0a48f7033070dcccbed808d03722b616138845deae95fd4be9d14ed024b45b",
+                      "hashAlgo":  "sha256"
+                  },
+                  {
+                      "path":  "bin/terrain_sync_and_test.lua",
+                      "size":  1037,
+                      "hash":  "2e1d26f09d141e77f8a4df88d124ad2f6348323f753245e121c45f6dbecd32ed",
+                      "hashAlgo":  "sha256"
+                  },
+                  {
+                      "path":  "bin/terrain_test_only.lua",
+                      "size":  533,
+                      "hash":  "1dbfe3e73b4be80aa5cb9948dc82914524edaf1d416930e74d03b0c1295ec6dc",
+                      "hashAlgo":  "sha256"
+                  },
+                  {
+                      "path":  "terrain/agent_config.lua",
+                      "size":  724,
+                      "hash":  "b0a1e782405c3e2dde1caadc48035cb33f75daf7ef9cb07aebfe006e7ec5eaf7",
+                      "hashAlgo":  "sha256"
+                  },
+                  {
+                      "path":  "terrain/harness.lua",
+                      "size":  4553,
+                      "hash":  "a33463f3783e8b2fc50615ee46b8f811c8177626d4061856678aef6ab9db5f6c",
+                      "hashAlgo":  "sha256"
+                  },
+                  {
+                      "path":  "terrain/report_runner.lua",
+                      "size":  1890,
+                      "hash":  "66c0715844e3dfb8d68d822578cfccc27283177da214a7ee5ef2a336af523ad8",
+                      "hashAlgo":  "sha256"
+                  },
+                  {
+                      "path":  "terrain/agent_daemon.lua",
+                      "size":  17344,
+                      "hash":  "4e5b3271d38977c238f4cffacdc7b5fd0a17ee9b121daf362e2c71c6706c340a",
+                      "hashAlgo":  "sha256"
+                  },
+                  {
+                      "path":  "terrain/boot.lua",
+                      "size":  2328,
+                      "hash":  "31506265bbf43ebb4db9facb390cd517583e40826f82bc20baf6590c034b5c5f",
+                      "hashAlgo":  "sha256"
+                  },
+                  {
+                      "path":  "terrain/suites/smoke.lua",
+                      "size":  1174,
+                      "hash":  "b30a277dcfa05e17d50835498f43c7c6a9f921fd8ea15cd5f9e15ba48dc9dc9a",
+                      "hashAlgo":  "sha256"
+                  },
+                  {
+                      "path":  "terrain/suites/update_validation.lua",
+                      "size":  1454,
+                      "hash":  "2f4fd05fa3e86efe15d5b35aec3ce941e30eacb06239b46bc8897d5d6144ef97",
+                      "hashAlgo":  "sha256"
+                  },
+                  {
+                      "path":  "terrain/suites/peripherals.lua",
+                      "size":  1512,
+                      "hash":  "9cc9b656fc4db2fa88df0c2d28bb87b331827cdaf3b196cb68f371916497b5a2",
+                      "hashAlgo":  "sha256"
                   }
               ],
-    "commit":  "46108e86f3e25751d373b4fb58f3e8b5b9cb7474"
+    "commit":  "cdea7bd80723a5fc9987c484f3b62c32054cbfd2"
 }

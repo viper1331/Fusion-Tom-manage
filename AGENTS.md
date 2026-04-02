@@ -24,6 +24,70 @@ Toute itération Codex/agent doit se faire **à partir de ce dépôt** et doit s
 
 ---
 
+## Règle branche brouillon terrain
+
+Pour la phase d'intégration terrain auto-orchestrée, la branche de travail obligatoire est `codex/terrain-auto-orchestration`.
+
+Règle de promotion obligatoire:
+1. intégration et correctifs sur la branche brouillon ;
+2. validation terrain réelle (NeoForge/ComputerCraft) avec rapports exploitables ;
+3. seulement après validation terrain OK, promotion vers `main`.
+
+Interdiction explicite:
+- ne jamais développer directement sur `main` tant que la validation terrain brouillon n'est pas validée ;
+- ne jamais considérer `main` comme prête tant que la preuve terrain n'est pas disponible.
+
+---
+
+## Workflow terrain réel à deux computers (obligatoire)
+
+Le workflow terrain réel repose sur deux cibles distinctes:
+- un **computer de test** ;
+- un **computer principal**.
+
+Les deux rôles sont obligatoires et non interchangeables pour la validation finale.
+
+### 1. Validation terrain brouillon (computer de test)
+Toute itération de code doit suivre cette boucle:
+1. code sur `codex/terrain-auto-orchestration` ;
+2. commit/push de la branche brouillon ;
+3. publication locale de release ;
+4. commande `sync_and_test` vers le computer de test ;
+5. lecture de `results` et `reports` ;
+6. correction et nouvelle boucle si échec.
+
+Sans validation terrain du computer de test, la promotion vers `main` est interdite.
+
+### 2. Promotion vers main
+La promotion vers `main` est autorisée uniquement si:
+- la validation terrain du computer de test est OK ;
+- les rapports sont exploitables ;
+- aucune régression bloquante n'est ouverte.
+
+La promotion vers `main` ne doit jamais être basée uniquement sur:
+- un test local ;
+- un test statique ;
+- une intuition de comportement.
+
+### 3. Déploiement post-main obligatoire
+Après promotion vers `main`, Codex doit déclencher le déploiement terrain sur:
+1. le computer de test ;
+2. le computer principal.
+
+Le déploiement post-main doit inclure:
+- sync/update ;
+- exécution des suites terrain ;
+- remontée d'un statut et d'un report pour chaque computer.
+
+### 4. Critère de fin d'opération
+Une opération n'est terminée que si:
+1. le brouillon est validé sur le computer de test ;
+2. `main` est mise à jour ;
+3. le computer de test et le computer principal sont alignés sur la version issue de `main` ;
+4. les deux computers ont renvoyé un retour exploitable (`results` et `reports`).
+
+---
+
 ## Périmètre technique du projet
 
 Le projet concerne principalement :
@@ -213,6 +277,14 @@ Le compte rendu de l'agent doit préciser explicitement :
 - ce qui a été validé via rapport terrain ;
 - ce qui reste non validé en environnement réel ;
 - si la conclusion repose sur une preuve terrain ou sur une hypothèse.
+
+### Règle promotion et déploiement terrain
+La validation terrain doit être distinguée en 3 étapes obligatoires:
+1. validation terrain de la branche brouillon sur le computer de test ;
+2. promotion vers `main` uniquement après preuve terrain du computer de test ;
+3. déploiement post-main sur computer de test puis computer principal avec statuts/reports exploitables.
+
+Une itération ne peut pas être considérée comme terminée si l'une de ces étapes manque.
 
 ---
 
@@ -489,7 +561,9 @@ Le résumé doit aussi préciser :
 - pourquoi ce module est le bon emplacement ;
 - pourquoi la modification ne remonolithise pas le projet ;
 - ce qui repose sur validation locale ;
-- ce qui repose sur validation terrain ;
+- ce qui repose sur validation terrain brouillon (computer de test) ;
+- si la promotion vers `main` a été faite ou non ;
+- si le déploiement post-main sur computer de test et computer principal a été exécuté ;
 - ce qui reste à vérifier sur le terrain.
 
 Le résumé doit être utile pour reprendre rapidement l'itération suivante.
@@ -516,6 +590,10 @@ L'agent ne doit jamais :
 - utiliser un faux client non compatible avec l'environnement NeoForge comme preuve de validation terrain ;
 - conclure à une compatibilité terrain sans rapport MCP, test réel ou retour utilisateur explicite ;
 - présenter une hypothèse locale comme une preuve terrain ;
+- promouvoir vers `main` sans validation terrain préalable du computer de test ;
+- considérer `main` comme déployée tant que le computer principal n'est pas synchronisé ;
+- oublier de redéployer le computer de test après une promotion vers `main` ;
+- committer `tools/terrain_bridge/data/` ;
 - modifier silencieusement la structure de configuration sans évaluer l'impact sur `install.lua` et la configuration existante ;
 - modifier la version ou le manifeste sans lien réel avec le comportement du programme ;
 - contourner l'architecture modulaire existante par facilité ;

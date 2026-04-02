@@ -46,6 +46,17 @@ return {
     requireConfirmApply = true,
     autoCheckOnStartup = false,
   },
+  terrainAgent = {
+    enabled = false,
+    collectorBaseUrl = "http://127.0.0.1:8765",
+    pollSeconds = 5,
+    runtimeMode = "runtime_gated",
+    computerName = "",
+    autoStart = true,
+    commandAckEndpoint = "/command/ack",
+    pendingReportFile = "/terrain_agent.pending_report.json",
+    pendingResultFile = "/terrain_agent.pending_result.json",
+  },
   validation = {
     overviewSource = "terrain",
     overviewScenario = "offline",

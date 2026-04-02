@@ -169,6 +169,45 @@ if ($null -ne $manifest) {
       }
     }
 
+    $terrainCriticalFiles = @(
+      "startup.lua",
+      "core/update/orchestrator.lua",
+      "bin/update_check.lua",
+      "bin/update_sync.lua",
+      "bin/update_apply.lua",
+      "bin/update_rollback.lua",
+      "bin/terrain_sync_and_test.lua",
+      "bin/terrain_test_only.lua",
+      "terrain/agent_config.lua",
+      "terrain/harness.lua",
+      "terrain/report_runner.lua",
+      "terrain/agent_daemon.lua",
+      "terrain/boot.lua",
+      "terrain/suites/smoke.lua",
+      "terrain/suites/update_validation.lua",
+      "terrain/suites/peripherals.lua"
+    )
+
+    $terrainLayerDetected = $false
+    foreach ($terrainPath in $terrainCriticalFiles) {
+      if (Test-Path -LiteralPath $terrainPath) {
+        $terrainLayerDetected = $true
+        break
+      }
+    }
+
+    if ($terrainLayerDetected) {
+      foreach ($terrainPath in $terrainCriticalFiles) {
+        if (-not (Test-Path -LiteralPath $terrainPath)) {
+          $errors.Add("critical terrain file missing on disk: $terrainPath")
+          continue
+        }
+        if (-not $filePaths.Contains($terrainPath)) {
+          $errors.Add("critical terrain file missing in manifest.files: $terrainPath")
+        }
+      }
+    }
+
     if ($manifest.PSObject.Properties.Name -notcontains "project" -or [string]::IsNullOrWhiteSpace([string]$manifest.project)) {
       $warnings.Add("manifest.project missing (recommended for release metadata)")
     }

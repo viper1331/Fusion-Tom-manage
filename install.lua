@@ -53,6 +53,17 @@ local defaults = {
     requireConfirmApply = true,
     autoCheckOnStartup = false,
   },
+  terrainAgent = {
+    enabled = false,
+    collectorBaseUrl = "http://127.0.0.1:8765",
+    pollSeconds = 5,
+    runtimeMode = "runtime_gated",
+    computerName = "",
+    autoStart = true,
+    commandAckEndpoint = "/command/ack",
+    pendingReportFile = "/terrain_agent.pending_report.json",
+    pendingResultFile = "/terrain_agent.pending_result.json",
+  },
   validation = {
     overviewSource = "terrain",
     overviewScenario = "offline",
@@ -274,8 +285,22 @@ local function stepUpdate()
   cfg.update.autoCheckOnStartup = promptBool(cfg.update.autoCheckOnStartup, "Auto CHECK au demarrage")
 end
 
+local function stepTerrainAgent()
+  title("Etape 9 - Agent terrain")
+  cfg.terrainAgent.enabled = promptBool(cfg.terrainAgent.enabled, "Activer l'agent terrain")
+  cfg.terrainAgent.collectorBaseUrl = prompt(cfg.terrainAgent.collectorBaseUrl, "Collector base URL")
+  cfg.terrainAgent.pollSeconds = promptNumber(cfg.terrainAgent.pollSeconds, "Polling agent (secondes)", 1, 300)
+  local mode = string.lower(prompt(cfg.terrainAgent.runtimeMode or "runtime_gated", "Mode agent (runtime_gated/daemon)"))
+  if mode ~= "daemon" and mode ~= "runtime_gated" then
+    mode = "runtime_gated"
+  end
+  cfg.terrainAgent.runtimeMode = mode
+  cfg.terrainAgent.computerName = prompt(cfg.terrainAgent.computerName, "Nom computer terrain (vide = auto)")
+  cfg.terrainAgent.autoStart = promptBool(cfg.terrainAgent.autoStart, "Demarrer auto via startup.lua (mode daemon)")
+end
+
 local function stepLogging()
-  title("Etape 9 - Logging")
+  title("Etape 10 - Logging")
   cfg.logging.level = string.upper(prompt(cfg.logging.level, "Niveau logs (DEBUG/INFO/WARN/ERROR)"))
   cfg.logging.files.runtime = prompt(cfg.logging.files.runtime, "Fichier log runtime")
   cfg.logging.files.update = prompt(cfg.logging.files.update, "Fichier log MAJ")
@@ -309,6 +334,12 @@ local function summary()
   print("Update branch: " .. tostring(cfg.update.branch))
   print("Integrity mode: " .. tostring(cfg.update.integrityMode))
   print("Auto-check: " .. tostring(cfg.update.autoCheckOnStartup))
+  print("Terrain agent enabled: " .. tostring((cfg.terrainAgent and cfg.terrainAgent.enabled) or false))
+  print("Terrain collector: " .. tostring((cfg.terrainAgent and cfg.terrainAgent.collectorBaseUrl) or ""))
+  print("Terrain poll: " .. tostring((cfg.terrainAgent and cfg.terrainAgent.pollSeconds) or 5) .. " s")
+  print("Terrain mode: " .. tostring((cfg.terrainAgent and cfg.terrainAgent.runtimeMode) or "runtime_gated"))
+  print("Terrain computer: " .. tostring((cfg.terrainAgent and cfg.terrainAgent.computerName) or ""))
+  print("Terrain auto-start: " .. tostring((cfg.terrainAgent and cfg.terrainAgent.autoStart) or false))
   print("Validation source: " .. tostring((cfg.validation and cfg.validation.overviewSource) or "terrain"))
   print("Validation scenario: " .. tostring((cfg.validation and cfg.validation.overviewScenario) or "offline"))
   print("Log level: " .. tostring((cfg.logging and cfg.logging.level) or "INFO"))
@@ -337,5 +368,6 @@ stepRelays()
 stepRelaySides()
 stepControl()
 stepUpdate()
+stepTerrainAgent()
 stepLogging()
 summary()
