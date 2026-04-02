@@ -20,6 +20,12 @@ local function drawCompact5x5(args)
   local drawImageStack = args.drawImageStack
   local sv = args.sv
   local gpu = args.gpu
+  local safeFilledRect = args.safeFilledRect or function(x, y, w, h, color)
+    gpu.filledRectangle(x, y, w, h, color)
+  end
+  local safeRectangle = args.safeRectangle or function(x, y, w, h, color)
+    gpu.rectangle(x, y, w, h, color)
+  end
   local activeGpuName = args.activeGpuName
   local gpuMode = args.gpuMode
 
@@ -49,8 +55,8 @@ local function drawCompact5x5(args)
   local innerY = bottom.y + sv(22)
   local innerW = bottom.w - ui.pad * 2
   local innerH = bottom.h - sv(30)
-  gpu.filledRectangle(innerX, innerY, innerW, innerH, colors.white)
-  gpu.rectangle(innerX, innerY, innerW, innerH, colors.border)
+  safeFilledRect(innerX, innerY, innerW, innerH, colors.white)
+  safeRectangle(innerX, innerY, innerW, innerH, colors.border)
   drawImageStack(innerX + ui.smallPad, innerY + ui.smallPad, innerW - ui.smallPad * 2, innerH - ui.smallPad * 2, data)
 
   local infoY = innerY + innerH - sv(20)
@@ -74,6 +80,12 @@ function M.draw(args)
   local drawImageStack = args.drawImageStack
   local sv = args.sv
   local gpu = args.gpu
+  local safeFilledRect = args.safeFilledRect or function(x, y, w, h, color)
+    gpu.filledRectangle(x, y, w, h, color)
+  end
+  local safeRectangle = args.safeRectangle or function(x, y, w, h, color)
+    gpu.rectangle(x, y, w, h, color)
+  end
   local activeGpuName = args.activeGpuName
   local gpuMode = args.gpuMode
 
@@ -111,8 +123,8 @@ function M.draw(args)
   local innerY = right.y + sv(38)
   local innerW = right.w - ui.pad * 2
   local innerH = right.h - sv(46)
-  gpu.filledRectangle(innerX, innerY, innerW, innerH, colors.white)
-  gpu.rectangle(innerX, innerY, innerW, innerH, colors.border)
+  safeFilledRect(innerX, innerY, innerW, innerH, colors.white)
+  safeRectangle(innerX, innerY, innerW, innerH, colors.border)
   drawImageStack(innerX + ui.smallPad, innerY + ui.smallPad, innerW - ui.smallPad * 2, innerH - ui.smallPad * 2, data)
 
   local infoBaseY = innerY + innerH - sv(74)

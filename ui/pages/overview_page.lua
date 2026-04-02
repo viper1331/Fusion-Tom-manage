@@ -76,6 +76,12 @@ local function drawOverviewImageZone(args, zones)
   local data = args.data
   local sv = args.sv
   local gpu = args.gpu
+  local safeFilledRect = args.safeFilledRect or function(x, y, w, h, color)
+    gpu.filledRectangle(x, y, w, h, color)
+  end
+  local safeRectangle = args.safeRectangle or function(x, y, w, h, color)
+    gpu.rectangle(x, y, w, h, color)
+  end
 
   local left = zones.main
 
@@ -84,8 +90,8 @@ local function drawOverviewImageZone(args, zones)
   local innerY = left.y + sv(32)
   local innerW = math.max(4, left.w - ui.pad * 2)
   local innerH = math.max(4, left.h - sv(40))
-  gpu.filledRectangle(innerX, innerY, innerW, innerH, C.white)
-  gpu.rectangle(innerX, innerY, innerW, innerH, C.border)
+  safeFilledRect(innerX, innerY, innerW, innerH, C.white)
+  safeRectangle(innerX, innerY, innerW, innerH, C.border)
 
   local imgInset = 1
   local imgX = innerX + imgInset
@@ -120,13 +126,13 @@ local function drawOverviewImageZone(args, zones)
 
   local statusColor = args.chooseStateColor(data)
 
-  gpu.filledRectangle(badgeX, badgeY, badgeW, badgeH, C.panel)
-  gpu.rectangle(badgeX, badgeY, badgeW, badgeH, C.border)
+  safeFilledRect(badgeX, badgeY, badgeW, badgeH, C.panel)
+  safeRectangle(badgeX, badgeY, badgeW, badgeH, C.border)
   args.drawTextCenter(badgeX, badgeY + math.max(0, math.floor((badgeH - args.textPixelHeight(1)) / 2)), badgeW, data.status, statusColor, 1)
 
   local laserCountText = ui.micro and ("Lx" .. tostring(args.control.laserModuleCount)) or ("LASER x" .. tostring(args.control.laserModuleCount))
-  gpu.filledRectangle(countBadgeX, countBadgeY, countBadgeW, countBadgeH, C.panel2)
-  gpu.rectangle(countBadgeX, countBadgeY, countBadgeW, countBadgeH, C.border)
+  safeFilledRect(countBadgeX, countBadgeY, countBadgeW, countBadgeH, C.panel2)
+  safeRectangle(countBadgeX, countBadgeY, countBadgeW, countBadgeH, C.border)
   args.drawTextCenter(
     countBadgeX,
     countBadgeY + math.max(0, math.floor((countBadgeH - args.textPixelHeight(1)) / 2)),

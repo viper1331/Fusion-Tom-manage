@@ -248,44 +248,62 @@ local function fitTextToWidth(gpu, text, size, angle, maxWidth)
 end
 
 local function callGpuDrawText(args, gpu, drawX, drawY, drawText, drawColor, drawBgColor, drawSize, drawAngle)
-  local function callWithBg()
-    return pcall(gpu.drawText, drawX, drawY, drawText, drawColor, drawBgColor, drawSize, drawAngle)
-  end
+  local callModes = {
+    with_bg_angle = function()
+      return pcall(gpu.drawText, drawX, drawY, drawText, drawColor, drawBgColor, drawSize, drawAngle)
+    end,
+    with_bg = function()
+      return pcall(gpu.drawText, drawX, drawY, drawText, drawColor, drawBgColor, drawSize)
+    end,
+    no_bg_angle = function()
+      return pcall(gpu.drawText, drawX, drawY, drawText, drawColor, drawSize, drawAngle)
+    end,
+    no_bg = function()
+      return pcall(gpu.drawText, drawX, drawY, drawText, drawColor, drawSize)
+    end,
+    color_only = function()
+      return pcall(gpu.drawText, drawX, drawY, drawText, drawColor)
+    end,
+  }
 
-  local function callNoBg()
-    return pcall(gpu.drawText, drawX, drawY, drawText, drawColor, drawSize, drawAngle)
-  end
+  local callOrder = {
+    "with_bg_angle",
+    "with_bg",
+    "no_bg_angle",
+    "no_bg",
+    "color_only",
+  }
 
-  if drawTextSignatureMode == "no_bg" then
-    return callNoBg()
-  end
-  if drawTextSignatureMode == "with_bg" then
-    return callWithBg()
-  end
-
-  local ok, err = callWithBg()
-  if ok then
-    drawTextSignatureMode = "with_bg"
-    return ok, err
-  end
-
-  local errText = string.lower(tostring(err or ""))
-  local badArg5 = string.find(errText, "argument #5", 1, true) ~= nil
-  local badArg6 = string.find(errText, "argument #6", 1, true) ~= nil
-  local badArg7 = string.find(errText, "argument #7", 1, true) ~= nil
-  if badArg5 or badArg6 or badArg7 then
-    local okNoBg, errNoBg = callNoBg()
-    if okNoBg then
-      drawTextSignatureMode = "no_bg"
-      logGpu(args, "INFO", "drawText signature fallback applied", {
-        signature = "no_bg",
-      }, "gpu.drawText.signature.no_bg", 60000)
-      return okNoBg, errNoBg
+  local function tryMode(mode)
+    local caller = callModes[mode]
+    if type(caller) ~= "function" then
+      return false, "unknown drawText mode: " .. tostring(mode)
     end
-    return okNoBg, errNoBg
+    return caller()
   end
 
-  return ok, err
+  if drawTextSignatureMode ~= "auto" then
+    local okKnown, errKnown = tryMode(drawTextSignatureMode)
+    if okKnown then
+      return okKnown, errKnown
+    end
+    drawTextSignatureMode = "auto"
+  end
+
+  local lastErr = "drawText signature fallback exhausted"
+  for _, mode in ipairs(callOrder) do
+    local ok, err = tryMode(mode)
+    if ok then
+      drawTextSignatureMode = mode
+      logGpu(args, "INFO", "drawText signature fallback applied", {
+        signature = mode,
+      }, "gpu.drawText.signature." .. tostring(mode), 60000)
+      return ok, err
+    end
+    lastErr = err
+  end
+
+  return false, lastErr
 end
 
 function M.filledRect(args, x, y, w, h, color)

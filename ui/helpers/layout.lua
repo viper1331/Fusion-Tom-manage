@@ -15,8 +15,8 @@ function M.classifyScreen(sw, sh)
   if width <= 256 and height <= 256 then
     return "ultra_compact_4x4"
   end
-  -- Field correction: 320x256 (low compact) must use 4x4 survival class.
-  if minSide <= 256 and maxSide <= 340 then
+  -- Field correction: 320x256 (and close low-compact variants) use 4x4 class.
+  if (minSide <= 260 and maxSide <= 340) then
     return "ultra_compact_4x4"
   end
   if minSide <= 170 and maxSide <= 280 then

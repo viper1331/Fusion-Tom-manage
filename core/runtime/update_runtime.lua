@@ -117,20 +117,21 @@ local function appendUpdateLogLine(message)
 end
 
 local function updateStatusColor(status)
+  local mutedColor = (type(C) == "table" and tonumber(C.muted)) or 0xFF9AA8B8
   if status == UPDATE_STATUS.UP_TO_DATE then
-    return C.green
+    return (type(C) == "table" and tonumber(C.green)) or 0xFF40D46A
   end
   if status == UPDATE_STATUS.UPDATE_AVAILABLE or status == UPDATE_STATUS.READY_TO_APPLY then
-    return C.orange
+    return (type(C) == "table" and tonumber(C.orange)) or 0xFFE3A33D
   end
   if status == UPDATE_STATUS.CHECKING or status == UPDATE_STATUS.DOWNLOADING or status == UPDATE_STATUS.APPLYING then
-    return C.cyan
+    return (type(C) == "table" and tonumber(C.cyan)) or 0xFF52C7FF
   end
   if status == UPDATE_STATUS.VALIDATING then
-    return C.yellow
+    return (type(C) == "table" and tonumber(C.yellow)) or 0xFFE4C84A
   end
   if status == UPDATE_STATUS.ROLLBACK_DONE then
-    return C.yellow
+    return (type(C) == "table" and tonumber(C.yellow)) or 0xFFE4C84A
   end
   if status == UPDATE_STATUS.CHECK_FAILED
     or status == UPDATE_STATUS.DOWNLOAD_FAILED
@@ -138,9 +139,9 @@ local function updateStatusColor(status)
     or status == UPDATE_STATUS.APPLY_FAILED
     or status == UPDATE_STATUS.ROLLBACK_FAILED
   then
-    return C.red
+    return (type(C) == "table" and tonumber(C.red)) or 0xFFE05252
   end
-  return C.muted
+  return mutedColor
 end
 
 local function setUpdateStatus(status, detail, logIt)

@@ -770,13 +770,39 @@ local function drawTextCenter(x, y, w, text, color, size)
   )
 end
 
+local function safeFilledRect(x, y, w, h, color)
+  return GpuSafe.filledRect(
+    { gpu = gpu, ui = ui, logger = appLogger, logCategory = "GPU" },
+    x,
+    y,
+    w,
+    h,
+    color
+  )
+end
+
+local function safeRectangle(x, y, w, h, color)
+  return GpuSafe.rectangle(
+    { gpu = gpu, ui = ui, logger = appLogger, logCategory = "GPU" },
+    x,
+    y,
+    w,
+    h,
+    color
+  )
+end
+
 local function drawPanel(x, y, w, h, title)
-  gpu.filledRectangle(x, y, w, h, C.panel)
-  gpu.rectangle(x, y, w, h, C.border)
+  safeFilledRect(x, y, w, h, C.panel)
+  safeRectangle(x, y, w, h, C.border)
 
   if title and title ~= "" then
     drawText(x + ui.pad, y + sv(8), title, C.text, ui.titleSize)
-    gpu.line(x + ui.pad, y + ui.titleBarY, x + w - ui.pad, y + ui.titleBarY, C.green)
+    local lineX = x + ui.pad
+    local lineW = math.max(0, (x + w - ui.pad) - lineX + 1)
+    if lineW > 0 then
+      safeFilledRect(lineX, y + ui.titleBarY, lineW, 1, C.green)
+    end
   end
 end
 
@@ -800,8 +826,8 @@ local function drawButton(id, x, y, w, h, text, tone, active)
     fg = C.white
   end
 
-  gpu.filledRectangle(x, y, w, h, bg)
-  gpu.rectangle(x, y, w, h, C.border)
+  safeFilledRect(x, y, w, h, bg)
+  safeRectangle(x, y, w, h, C.border)
 
   local ty = y + math.max(0, math.floor((h - textPixelHeight(1)) / 2))
   drawTextCenter(x, ty, w, text, fg, 1)
@@ -823,9 +849,9 @@ local function drawGauge(x, y, w, h, pct, color, label, valueText)
   drawText(x, labelY, label, C.text, 1)
   drawTextRight(x + w, labelY, valueText, C.text, 1)
 
-  gpu.filledRectangle(x, y, w, h, C.barBg)
-  gpu.rectangle(x, y, w, h, C.border)
-  gpu.filledRectangle(x + 2, y + 2, fillW, h - 4, color)
+  safeFilledRect(x, y, w, h, C.barBg)
+  safeRectangle(x, y, w, h, C.border)
+  safeFilledRect(x + 2, y + 2, fillW, h - 4, color)
 end
 
 -- Reactor/laser rendering and related animations are delegated
@@ -1159,8 +1185,8 @@ local function drawHeader(r, data)
   end
   local stateColor = chooseStateColor(data)
 
-  gpu.filledRectangle(capsuleX, capsuleY, capsuleW, capsuleH, C.panel2)
-  gpu.rectangle(capsuleX, capsuleY, capsuleW, capsuleH, C.border)
+  safeFilledRect(capsuleX, capsuleY, capsuleW, capsuleH, C.panel2)
+  safeRectangle(capsuleX, capsuleY, capsuleW, capsuleH, C.border)
   drawTextCenter(
     capsuleX,
     capsuleY + math.max(0, math.floor((capsuleH - textPixelHeight(1)) / 2)),
@@ -1209,8 +1235,8 @@ local function drawFooter(r, data)
 end
 
 local function drawMicroHeader(r, data)
-  gpu.filledRectangle(r.x, r.y, r.w, r.h, C.panel)
-  gpu.rectangle(r.x, r.y, r.w, r.h, C.border)
+  safeFilledRect(r.x, r.y, r.w, r.h, C.panel)
+  safeRectangle(r.x, r.y, r.w, r.h, C.border)
 
   local leftText = ui.ultraCompact and "FR" or "FR-U1"
   local rightText = data.status == "STABLE" and "ON" or data.status
@@ -1280,7 +1306,7 @@ local function drawMicroOverview(r, data)
     h = statsH,
   }
 
-  gpu.filledRectangle(imageRect.x, imageRect.y, imageRect.w, imageRect.h, C.white)
+  safeFilledRect(imageRect.x, imageRect.y, imageRect.w, imageRect.h, C.white)
   drawImageStack(
     imageRect.x + 1,
     imageRect.y + 1,
@@ -1301,8 +1327,8 @@ local function drawMicroOverview(r, data)
   )
 
   if statsH > 0 then
-    gpu.filledRectangle(statsRect.x, statsRect.y, statsRect.w, statsRect.h, C.panel)
-    gpu.rectangle(statsRect.x, statsRect.y, statsRect.w, statsRect.h, C.border)
+    safeFilledRect(statsRect.x, statsRect.y, statsRect.w, statsRect.h, C.panel)
+    safeRectangle(statsRect.x, statsRect.y, statsRect.w, statsRect.h, C.border)
 
     local y = statsRect.y + math.max(1, math.floor((statsRect.h - textPixelHeight(1)) / 2))
     local summary = "E " .. tostring(math.floor(data.energyPct or 0)) .. "%  DT " .. tostring(math.floor(data.dtPct or 0)) .. "%"
@@ -1425,6 +1451,8 @@ local function drawOverviewPage(r, data)
     drawGauge = drawGauge,
     drawToggleRow = drawToggleRow,
     drawTextCenter = drawTextCenter,
+    safeFilledRect = safeFilledRect,
+    safeRectangle = safeRectangle,
     chooseStateColor = chooseStateColor,
     drawReactorLaserScene = drawOverviewReactorLaserScene,
     sv = sv,
@@ -1484,6 +1512,8 @@ local function drawSystemPage(r, data)
     drawText = drawText,
     drawTextRight = drawTextRight,
     drawImageStack = drawImageStack,
+    safeFilledRect = safeFilledRect,
+    safeRectangle = safeRectangle,
     sv = sv,
     gpu = gpu,
     activeGpuName = ACTIVE_GPU_NAME,

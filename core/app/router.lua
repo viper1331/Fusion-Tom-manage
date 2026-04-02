@@ -40,6 +40,24 @@ local function classifyAction(ctx, action)
   return "other"
 end
 
+local function runUpdateAction(ctx, action, fn)
+  local ok, resultOk, resultMessage = pcall(fn)
+  if ok then
+    logWithLevel(ctx.logger, "info", "UPDATE", "update action completed", {
+      action = tostring(action),
+      ok = resultOk == true,
+    })
+    return resultOk, resultMessage
+  end
+
+  local errorText = tostring(resultOk or "unknown update runtime error")
+  logWithLevel(ctx.logger, "error", "UPDATE", "update action crashed", {
+    action = tostring(action),
+    error = errorText,
+  })
+  return false, errorText
+end
+
 function M.setPage(ctx, pageId)
   if not ctx.pageExists(pageId) then
     ctx.state.message = "unknown page: " .. tostring(pageId)
@@ -109,7 +127,9 @@ function M.handleAction(ctx, action)
       action = "UPDATE_CHECK",
       page = tostring(ctx.state.page or "n/a"),
     })
-    local ok, msg = ctx.performUpdateCheck("manual")
+    local ok, msg = runUpdateAction(ctx, "UPDATE_CHECK", function()
+      return ctx.performUpdateCheck("manual")
+    end)
     ctx.state.message = ok and ("MAJ CHECK -> " .. tostring(ctx.state.update.remoteStatus) .. " (" .. ctx.firstLine(msg) .. ")") or ("MAJ CHECK ERROR -> " .. ctx.firstLine(msg))
     logWithLevel(ctx.logger, ok and "info" or "warn", "ROUTER", "update check routed", {
       ok = ok == true,
@@ -121,7 +141,9 @@ function M.handleAction(ctx, action)
       action = "UPDATE_DOWNLOAD",
       page = tostring(ctx.state.page or "n/a"),
     })
-    local ok, msg = ctx.performUpdateDownload()
+    local ok, msg = runUpdateAction(ctx, "UPDATE_DOWNLOAD", function()
+      return ctx.performUpdateDownload()
+    end)
     ctx.state.message = ok and ("MAJ DOWNLOAD -> " .. tostring(ctx.state.update.remoteStatus) .. " (" .. ctx.firstLine(msg) .. ")") or ("MAJ DOWNLOAD ERROR -> " .. ctx.firstLine(msg))
     logWithLevel(ctx.logger, ok and "info" or "warn", "ROUTER", "update download routed", {
       ok = ok == true,
@@ -133,7 +155,9 @@ function M.handleAction(ctx, action)
       action = "UPDATE_APPLY",
       page = tostring(ctx.state.page or "n/a"),
     })
-    local ok, msg = ctx.performUpdateApply()
+    local ok, msg = runUpdateAction(ctx, "UPDATE_APPLY", function()
+      return ctx.performUpdateApply()
+    end)
     ctx.state.message = ok and ("MAJ APPLY -> " .. tostring(ctx.state.update.remoteStatus) .. " (" .. ctx.firstLine(msg) .. ")") or ("MAJ APPLY ERROR -> " .. ctx.firstLine(msg))
     logWithLevel(ctx.logger, ok and "info" or "warn", "ROUTER", "update apply routed", {
       ok = ok == true,
@@ -145,7 +169,9 @@ function M.handleAction(ctx, action)
       action = "UPDATE_ROLLBACK",
       page = tostring(ctx.state.page or "n/a"),
     })
-    local ok, msg = ctx.performUpdateRollback()
+    local ok, msg = runUpdateAction(ctx, "UPDATE_ROLLBACK", function()
+      return ctx.performUpdateRollback()
+    end)
     ctx.state.message = ok and ("MAJ ROLLBACK -> " .. tostring(ctx.state.update.remoteStatus) .. " (" .. ctx.firstLine(msg) .. ")") or ("MAJ ROLLBACK ERROR -> " .. ctx.firstLine(msg))
     logWithLevel(ctx.logger, ok and "info" or "warn", "ROUTER", "update rollback routed", {
       ok = ok == true,
@@ -157,7 +183,9 @@ function M.handleAction(ctx, action)
       action = "UPDATE_RESTART",
       page = tostring(ctx.state.page or "n/a"),
     })
-    local ok, msg = ctx.requestProgramRestart()
+    local ok, msg = runUpdateAction(ctx, "UPDATE_RESTART", function()
+      return ctx.requestProgramRestart()
+    end)
     ctx.state.message = ok and ctx.firstLine(msg) or ("restart failed: " .. ctx.firstLine(msg))
     logWithLevel(ctx.logger, ok and "info" or "warn", "ROUTER", "update restart routed", {
       ok = ok == true,
