@@ -12,9 +12,9 @@ local function resolveOverviewZones(args)
   local main = { x = r.x, y = r.y, w = r.w, h = math.max(1, r.h - alertsH - ui.gap) }
   local alerts = { x = r.x, y = main.y + main.h + ui.gap, w = r.w, h = alertsH }
 
-  local innerW = math.max(8, main.w - ui.pad * 2)
-  local innerH = math.max(8, main.h - sv(40))
-  local overviewLayout = chooseOverviewStackLayout(math.max(8, innerW - 2), math.max(8, innerH - 2), control.laserModuleCount)
+  local innerW = math.max(4, main.w - ui.pad * 2)
+  local innerH = math.max(4, main.h - sv(40))
+  local overviewLayout = chooseOverviewStackLayout(math.max(4, innerW - 2), math.max(4, innerH - 2), control.laserModuleCount)
 
   return {
     main = main,
@@ -82,20 +82,21 @@ local function drawOverviewImageZone(args, zones)
   args.drawPanel(left.x, left.y, left.w, left.h, "REACTOR")
   local innerX = left.x + ui.pad
   local innerY = left.y + sv(32)
-  local innerW = math.max(8, left.w - ui.pad * 2)
-  local innerH = math.max(8, left.h - sv(40))
+  local innerW = math.max(4, left.w - ui.pad * 2)
+  local innerH = math.max(4, left.h - sv(40))
   gpu.filledRectangle(innerX, innerY, innerW, innerH, C.white)
   gpu.rectangle(innerX, innerY, innerW, innerH, C.border)
 
   local imgInset = 1
   local imgX = innerX + imgInset
   local imgY = innerY + imgInset
-  local imgW = math.max(8, innerW - imgInset * 2)
-  local imgH = math.max(8, innerH - imgInset * 2)
+  local imgW = math.max(4, innerW - imgInset * 2)
+  local imgH = math.max(4, innerH - imgInset * 2)
 
   logOverviewViewport(args, zones, imgW, imgH)
 
-  local responsiveMode = ui.micro and "micro" or (ui.compact and "compact" or "large")
+  local responsiveMode = ui.overviewResponsiveMode or ui.overviewScreenClass
+    or (ui.micro and "micro" or (ui.compact and "compact" or "large"))
   local badgeW = ui.compact and math.max(70, sv(88)) or math.max(82, sv(102))
   local badgeH = math.max(14, sv(16))
   local badgeX = innerX + innerW - badgeW - ui.smallPad

@@ -97,6 +97,13 @@ local function resolveAnimationMode(data, animationContext)
 end
 
 local function resolveDensity(ui)
+  local screenClass = ui and tostring(ui.overviewScreenClass or "")
+  if screenClass == "ultra_compact_4x4" then
+    return 0.24
+  end
+  if screenClass == "ultra_compact_5x4_ou_6x4" then
+    return 0.34
+  end
   if ui and ui.micro then
     return 0.45
   end
@@ -113,6 +120,12 @@ local function resolveResponsiveFactor(args)
   end
 
   local mode = tostring(args and args.responsiveMode or "")
+  if mode == "ultra_compact_4x4" then
+    return 0.34
+  end
+  if mode == "ultra_compact_5x4_ou_6x4" then
+    return 0.48
+  end
   if mode == "micro" then
     return 0.62
   end
@@ -140,7 +153,14 @@ local function effectiveDensity(args, baseDensity)
   elseif visual and visual.effectLevel == "minimal" then
     density = density * 0.45
   end
-  return math.max(0.25, density)
+  local minDensity = 0.25
+  local mode = tostring(args and args.responsiveMode or "")
+  if mode == "ultra_compact_4x4" then
+    minDensity = 0.10
+  elseif mode == "ultra_compact_5x4_ou_6x4" then
+    minDensity = 0.14
+  end
+  return math.max(minDensity, density)
 end
 
 local function safeFilledRect(args, x, y, w, h, color)

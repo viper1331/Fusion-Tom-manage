@@ -528,12 +528,15 @@ local displayState = {
   lastInvalidScreenKey = nil,
   lastInvalidViewportKey = nil,
   lastInvalidRenderKey = nil,
+  lastScreenClassKey = nil,
+  lastSurvivalModeKey = nil,
+  lastPanelCollapseKey = nil,
 }
 
-local MIN_VALID_SCREEN_W = 96
-local MIN_VALID_SCREEN_H = 180
-local MIN_VALID_VIEWPORT_W = 48
-local MIN_VALID_VIEWPORT_H = 72
+local MIN_VALID_SCREEN_W = 32
+local MIN_VALID_SCREEN_H = 32
+local MIN_VALID_VIEWPORT_W = 16
+local MIN_VALID_VIEWPORT_H = 16
 
 local PAGES = {
   { id = "OVERVIEW", label = "OVERVIEW" },
@@ -867,12 +870,49 @@ local function buildUI()
   local scale = math.min(sw / 900, sh / 1400)
   scale = clamp(scale, 0.40, 2.20)
 
-  local micro = sw <= 160 or sh <= 340
-  local compact = micro or sw < 760 or (sw / sh) < 0.72
+  local screenClass = ResponsiveLayout.classifyScreen(sw, sh)
+  local ultraCompact = ResponsiveLayout.isUltraCompactClass(screenClass)
+  local ultraCompact4x4 = screenClass == "ultra_compact_4x4"
+  local micro = ultraCompact or screenClass == "micro"
+  local compact = micro or screenClass == "compact"
   local overviewPriority = (state.page == "OVERVIEW")
+
+  local screenClassKey = table.concat({
+    tostring(screenClass),
+    tostring(sw),
+    tostring(sh),
+  }, "|")
+  if screenClassKey ~= displayState.lastScreenClassKey then
+    appendUiRuntimeLog("screen class=" .. tostring(screenClass) .. " size=" .. tostring(sw) .. "x" .. tostring(sh))
+    displayState.lastScreenClassKey = screenClassKey
+  end
+  if ultraCompact then
+    local survivalKey = table.concat({
+      tostring(screenClass),
+      tostring(sw),
+      tostring(sh),
+    }, "|")
+    if survivalKey ~= displayState.lastSurvivalModeKey then
+      appendUiRuntimeLog(
+        "overview compact survival mode enabled"
+          .. " class=" .. tostring(screenClass)
+          .. " size=" .. tostring(sw) .. "x" .. tostring(sh)
+      )
+      displayState.lastSurvivalModeKey = survivalKey
+    end
+  else
+    displayState.lastSurvivalModeKey = nil
+  end
 
   local headerH = micro and math.max(24, math.floor(28 * scale + 0.5)) or math.max(56, math.floor(72 * scale + 0.5))
   local footerH = micro and 0 or math.max(52, math.floor(58 * scale + 0.5))
+  if ultraCompact4x4 then
+    headerH = math.max(12, math.floor(16 * scale + 0.5))
+    footerH = 0
+  elseif ultraCompact then
+    headerH = math.max(14, math.floor(18 * scale + 0.5))
+    footerH = 0
+  end
   if not micro and overviewPriority then
     headerH = compact and math.max(38, math.floor(46 * scale + 0.5)) or math.max(44, math.floor(52 * scale + 0.5))
     footerH = compact and math.max(24, math.floor(28 * scale + 0.5)) or math.max(28, math.floor(34 * scale + 0.5))
@@ -882,26 +922,51 @@ local function buildUI()
     sw = sw,
     sh = sh,
     scale = scale,
+    overviewScreenClass = screenClass,
+    overviewResponsiveMode = screenClass,
+    ultraCompact = ultraCompact,
+    ultraCompact4x4 = ultraCompact4x4,
     compact = compact,
     micro = micro,
 
-    margin = micro and math.max(2, math.floor(4 * scale + 0.5)) or math.max(8, math.floor(16 * scale + 0.5)),
-    gap = micro and math.max(2, math.floor(4 * scale + 0.5)) or math.max(6, math.floor(12 * scale + 0.5)),
-    pad = micro and math.max(3, math.floor(5 * scale + 0.5)) or math.max(8, math.floor(12 * scale + 0.5)),
-    smallPad = micro and math.max(1, math.floor(3 * scale + 0.5)) or math.max(6, math.floor(8 * scale + 0.5)),
+    margin = ultraCompact4x4 and 1
+      or (ultraCompact and math.max(1, math.floor(2 * scale + 0.5)))
+      or (micro and math.max(2, math.floor(4 * scale + 0.5)))
+      or math.max(8, math.floor(16 * scale + 0.5)),
+    gap = ultraCompact4x4 and 1
+      or (ultraCompact and math.max(1, math.floor(2 * scale + 0.5)))
+      or (micro and math.max(2, math.floor(4 * scale + 0.5)))
+      or math.max(6, math.floor(12 * scale + 0.5)),
+    pad = ultraCompact4x4 and 1
+      or (ultraCompact and math.max(1, math.floor(2 * scale + 0.5)))
+      or (micro and math.max(3, math.floor(5 * scale + 0.5)))
+      or math.max(8, math.floor(12 * scale + 0.5)),
+    smallPad = ultraCompact and 1
+      or (micro and math.max(1, math.floor(3 * scale + 0.5)))
+      or math.max(6, math.floor(8 * scale + 0.5)),
 
     headerH = headerH,
     navH = micro and 0 or math.max(30, math.floor(38 * scale + 0.5)),
     footerH = footerH,
-    buttonH = micro and math.max(16, math.floor(20 * scale + 0.5)) or math.max(28, math.floor(34 * scale + 0.5)),
-    gaugeH = micro and math.max(8, math.floor(10 * scale + 0.5)) or math.max(14, math.floor(18 * scale + 0.5)),
+    buttonH = ultraCompact4x4 and math.max(10, math.floor(12 * scale + 0.5))
+      or (ultraCompact and math.max(12, math.floor(14 * scale + 0.5)))
+      or (micro and math.max(16, math.floor(20 * scale + 0.5)))
+      or math.max(28, math.floor(34 * scale + 0.5)),
+    gaugeH = ultraCompact and math.max(6, math.floor(8 * scale + 0.5))
+      or (micro and math.max(8, math.floor(10 * scale + 0.5)))
+      or math.max(14, math.floor(18 * scale + 0.5)),
 
     titleSize = micro and 1 or (scale >= 1.35 and 2 or 1),
     headerTitleSize = micro and 1 or (scale >= 1.20 and 2 or 1),
 
-    titleBarY = micro and math.max(10, math.floor(12 * scale + 0.5)) or math.max(20, math.floor(28 * scale + 0.5)),
-    labelOffset = micro and math.max(8, math.floor(10 * scale + 0.5)) or math.max(12, math.floor(18 * scale + 0.5)),
-    tooSmall = sw < 96 or sh < 180,
+    titleBarY = ultraCompact4x4 and math.max(7, math.floor(8 * scale + 0.5))
+      or (ultraCompact and math.max(8, math.floor(10 * scale + 0.5)))
+      or (micro and math.max(10, math.floor(12 * scale + 0.5)))
+      or math.max(20, math.floor(28 * scale + 0.5)),
+    labelOffset = ultraCompact and math.max(6, math.floor(7 * scale + 0.5))
+      or (micro and math.max(8, math.floor(10 * scale + 0.5)))
+      or math.max(12, math.floor(18 * scale + 0.5)),
+    tooSmall = sw < 32 or sh < 32,
   }
 
   local m = ui.margin
@@ -1132,19 +1197,24 @@ local function drawMicroHeader(r, data)
   gpu.filledRectangle(r.x, r.y, r.w, r.h, C.panel)
   gpu.rectangle(r.x, r.y, r.w, r.h, C.border)
 
-  local leftText = "FR-U1"
+  local leftText = ui.ultraCompact and "FR" or "FR-U1"
   local rightText = data.status == "STABLE" and "ON" or data.status
+  if ui.ultraCompact and #rightText > 4 then
+    rightText = string.sub(rightText, 1, 4)
+  end
   local centerText = "Lx" .. tostring(CONTROL.laserModuleCount)
-  local navW = math.max(24, math.floor(r.w * 0.24))
-  local navH = math.max(12, r.h - 2)
+  local navW = ui.ultraCompact4x4 and math.max(16, math.floor(r.w * 0.20))
+    or math.max(24, math.floor(r.w * 0.24))
+  local navH = ui.ultraCompact and math.max(9, r.h - 2) or math.max(12, r.h - 2)
   local navX = r.x + r.w - navW - 1
   local navY = r.y + 1
   local navId = state.page == "MAJ" and "PAGE_OVERVIEW" or "PAGE_MAJ"
-  local navLabel = state.page == "MAJ" and "HOME" or "MAJ"
+  local navLabel = state.page == "MAJ" and (ui.ultraCompact and "HM" or "HOME") or "MAJ"
 
-  drawText(r.x + ui.pad, r.y + 2, leftText, C.text, 1)
-  drawTextCenter(r.x, r.y + 2, r.w, centerText, C.yellow, 1)
-  drawTextRight(navX - ui.smallPad, r.y + 2, rightText, chooseStateColor(data), 1)
+  local textY = ui.ultraCompact and (r.y + 1) or (r.y + 2)
+  drawText(r.x + ui.pad, textY, leftText, C.text, 1)
+  drawTextCenter(r.x, textY, r.w, centerText, C.yellow, 1)
+  drawTextRight(navX - ui.smallPad, textY, rightText, chooseStateColor(data), 1)
   drawButton(navId, navX, navY, navW, navH, navLabel, "purple", true)
 end
 
@@ -1152,9 +1222,32 @@ local function drawMicroOverview(r, data)
   drawPanel(r.x, r.y, r.w, r.h, nil)
 
   local statsH = math.max(18, math.floor(r.h * 0.10))
-  local imageH = math.max(20, r.h - statsH - ui.gap)
-  if imageH + ui.gap >= r.h then
+  local gap = ui.gap
+  if ui.ultraCompact then
     statsH = 0
+    gap = 0
+    local panelCollapseKey = table.concat({
+      tostring(ui.overviewScreenClass or "ultra"),
+      tostring(r.w),
+      tostring(r.h),
+    }, "|")
+    if panelCollapseKey ~= displayState.lastPanelCollapseKey then
+      appendUiRuntimeLog(
+        "panels collapsed for ultra compact"
+          .. " class=" .. tostring(ui.overviewScreenClass or "ultra")
+          .. " viewport=" .. tostring(r.w) .. "x" .. tostring(r.h)
+      )
+      displayState.lastPanelCollapseKey = panelCollapseKey
+    end
+  else
+    displayState.lastPanelCollapseKey = nil
+  end
+
+  local minImageH = ui.ultraCompact and 14 or 20
+  local imageH = math.max(minImageH, r.h - statsH - gap)
+  if imageH + gap >= r.h then
+    statsH = 0
+    gap = 0
     imageH = r.h
   end
 
@@ -1167,13 +1260,30 @@ local function drawMicroOverview(r, data)
 
   local statsRect = {
     x = r.x,
-    y = imageRect.y + imageRect.h + ui.gap,
+    y = imageRect.y + imageRect.h + gap,
     w = r.w,
     h = statsH,
   }
 
   gpu.filledRectangle(imageRect.x, imageRect.y, imageRect.w, imageRect.h, C.white)
-  drawImageStack(imageRect.x + 1, imageRect.y + 1, imageRect.w - 2, imageRect.h - 2, data)
+  drawImageStack(
+    imageRect.x + 1,
+    imageRect.y + 1,
+    math.max(1, imageRect.w - 2),
+    math.max(1, imageRect.h - 2),
+    data,
+    nil,
+    {
+      responsiveMode = ui.overviewResponsiveMode or ui.overviewScreenClass,
+      sceneViewport = {
+        x = imageRect.x + 1,
+        y = imageRect.y + 1,
+        w = math.max(1, imageRect.w - 2),
+        h = math.max(1, imageRect.h - 2),
+      },
+      reservedRects = {},
+    }
+  )
 
   if statsH > 0 then
     gpu.filledRectangle(statsRect.x, statsRect.y, statsRect.w, statsRect.h, C.panel)
@@ -1229,6 +1339,17 @@ local function drawUpdatePage(r)
 end
 
 local function drawImageStack(slotX, slotY, slotW, slotH, data, forcedLayout, responsiveOptions)
+  local resolvedResponsiveOptions = responsiveOptions
+  if type(resolvedResponsiveOptions) ~= "table" then
+    resolvedResponsiveOptions = {
+      responsiveMode = ui and (ui.overviewResponsiveMode or ui.overviewScreenClass) or nil,
+      sceneViewport = { x = slotX, y = slotY, w = slotW, h = slotH },
+      reservedRects = {},
+    }
+  elseif resolvedResponsiveOptions.responsiveMode == nil and ui then
+    resolvedResponsiveOptions.responsiveMode = ui.overviewResponsiveMode or ui.overviewScreenClass
+  end
+
   local rendererSceneMode = state.visual.sceneMode
   if rendererSceneMode ~= "pair" and rendererSceneMode ~= "reactor-only" and rendererSceneMode ~= "none" then
     if images.reactor and images.laserModule then
@@ -1264,7 +1385,7 @@ local function drawImageStack(slotX, slotY, slotW, slotH, data, forcedLayout, re
     laserAssetName = state.visual.moduleAsset,
     fallbackReactorVariant = getFallbackReactorVariant(),
     fallbackLaserVariant = getFallbackLaserModuleVariant(),
-    responsiveOptions = responsiveOptions,
+    responsiveOptions = resolvedResponsiveOptions,
   })
 end
 

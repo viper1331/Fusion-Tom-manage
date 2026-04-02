@@ -202,8 +202,13 @@ local function estimateOverviewSceneViewport()
 
   local body = ui.layout.body
   if ui.micro then
-    local statsH = math.max(18, math.floor(body.h * 0.10))
-    local imageH = body.h - statsH - ui.gap
+    local statsH = 0
+    local gap = 0
+    if not ui.ultraCompact then
+      statsH = math.max(18, math.floor(body.h * 0.10))
+      gap = ui.gap
+    end
+    local imageH = body.h - statsH - gap
     if imageH + ui.gap >= body.h then
       imageH = body.h
     end
@@ -393,6 +398,15 @@ local function resolveOverviewStackSpacing(options)
     maxHFill = profile.maxHFill or 1,
     spacingScale = spacingScale,
   }
+end
+
+local function resolveResponsiveMode()
+  syncUi()
+  local mode = OverviewCalibration.resolveMode(ui)
+  if type(mode) == "string" and mode ~= "" then
+    return mode
+  end
+  return "large"
 end
 
 -- Forward declaration: used by viewport fit helpers defined above
@@ -767,6 +781,7 @@ local function tryLoadAssets(reason)
   local hadPreviousVisual = hadPreviousReactor
   local previousReactor = hadPreviousReactor and tostring(state.visual.reactorAsset or "runtime") or "none"
   local previousModule = hadPreviousModule and tostring(state.visual.moduleAsset or "runtime") or "none"
+  local responsiveClass = resolveResponsiveMode()
   local requestedTier = preferredSceneTier()
   local viewportW, viewportH = estimateOverviewSceneViewport()
   local rejectReason = screenSizeRejectReason(screenW, screenH)
@@ -788,10 +803,12 @@ local function tryLoadAssets(reason)
         "screen invalid: width=" .. tostring(screenW)
           .. " height=" .. tostring(screenH)
           .. " reason=" .. tostring(rejectReason)
+          .. " class=" .. tostring(responsiveClass)
       )
       appendUiRuntimeLog(
         "asset reload skipped: invalid screen size"
           .. " reason=" .. tostring(rejectReason)
+          .. " class=" .. tostring(responsiveClass)
           .. " screen=" .. tostring(screenW) .. "x" .. tostring(screenH)
           .. " viewport=" .. tostring(viewportW or "n/a") .. "x" .. tostring(viewportH or "n/a")
           .. " preservePrevious=" .. tostring(hadPreviousVisual and "yes" or "no")
@@ -825,6 +842,7 @@ local function tryLoadAssets(reason)
   appendUiRuntimeLog(
     "asset reload start: reason=" .. reason
       .. ", screen=" .. screen
+      .. ", class=" .. tostring(responsiveClass)
       .. ", requestedTier=" .. tostring(requestedTier)
       .. ", viewport=" .. tostring(viewportW or "n/a") .. "x" .. tostring(viewportH or "n/a")
       .. ", previousPair=" .. tostring(previousReactor) .. "/" .. tostring(previousModule)
@@ -945,6 +963,7 @@ local lastLayoutVisualRejectLogKey = nil
 local lastLayoutHardRejectLogKey = nil
 local lastOverviewPairReductionLogKey = nil
 local lastOverviewPairAcceptedLogKey = nil
+local lastOverviewUltraDegradationLogKey = nil
 
 function resolveOverviewVisualBounds(slotW, slotH, spacing)
   local sidePad = math.max(0, math.floor(spacing.sidePad or 0))
@@ -1126,6 +1145,9 @@ local function chooseStackLayout(slotW, slotH, moduleCount, options)
   local bestFit = mergeBestCandidate(bestReactorFit, bestPairFit)
   local preferPair = options.preferPair == true
   local responsiveMode = tostring(options.responsiveMode or (ui and (ui.micro and "micro" or (ui.compact and "compact" or "large")) or "large"))
+  local constrainedMode = responsiveMode == "micro"
+    or responsiveMode == "ultra_compact_5x4_ou_6x4"
+    or responsiveMode == "ultra_compact_4x4"
 
   if preferPair then
     if bestPairCapped then
@@ -1166,8 +1188,8 @@ local function chooseStackLayout(slotW, slotH, moduleCount, options)
       if hardReject then
         fallbackReason = "hard_overflow"
       elseif visualReject then
-        fallbackReason = responsiveMode == "micro" and "micro_constraint" or "visual_margin_cap"
-      elseif responsiveMode == "micro" then
+        fallbackReason = constrainedMode and "micro_constraint" or "visual_margin_cap"
+      elseif constrainedMode then
         fallbackReason = "micro_constraint"
       end
       local fallbackLogKey = table.concat({
@@ -1189,7 +1211,7 @@ local function chooseStackLayout(slotW, slotH, moduleCount, options)
     end
 
     if bestReactorFit then
-      local fitReason = responsiveMode == "micro" and "micro_constraint" or "visual_margin_cap"
+      local fitReason = constrainedMode and "micro_constraint" or "visual_margin_cap"
       return annotateSelection(bestReactorFit, "reactor_visual_margin_cap", fitReason)
     end
   end
@@ -1338,6 +1360,20 @@ local function chooseStackLayout(slotW, slotH, moduleCount, options)
 end
 
 local function reductionScalesForMode(responsiveMode, slotW, slotH)
+  if responsiveMode == "ultra_compact_4x4" then
+    local out = { 0.88, 0.76, 0.66, 0.56, 0.48, 0.40, 0.34 }
+    if (tonumber(slotH) or 0) <= 140 then
+      out[#out + 1] = 0.30
+    end
+    return out
+  end
+  if responsiveMode == "ultra_compact_5x4_ou_6x4" then
+    local out = { 1.00, 0.88, 0.78, 0.68, 0.60, 0.52, 0.46 }
+    if (tonumber(slotH) or 0) <= 180 then
+      out[#out + 1] = 0.40
+    end
+    return out
+  end
   if responsiveMode == "micro" then
     local out = { 1.00, 0.90, 0.82, 0.74 }
     if (tonumber(slotH) or 0) <= 220 then
@@ -1362,8 +1398,25 @@ local function chooseOverviewStackLayout(slotW, slotH, configuredModuleCount)
   syncUi()
   local maxCount = math.max(1, tonumber(configuredModuleCount) or 1)
   local reactorOnlyFallback = nil
-  local responsiveMode = ui and (ui.micro and "micro" or (ui.compact and "compact" or "large")) or "large"
+  local responsiveMode = resolveResponsiveMode()
   local reductionScales = reductionScalesForMode(responsiveMode, slotW, slotH)
+  if responsiveMode == "ultra_compact_4x4" or responsiveMode == "ultra_compact_5x4_ou_6x4" then
+    local degradationKey = table.concat({
+      tostring(responsiveMode),
+      tostring(slotW),
+      tostring(slotH),
+      tostring(maxCount),
+    }, "|")
+    if degradationKey ~= lastOverviewUltraDegradationLogKey then
+      appendUiRuntimeLog(
+        "layout degradation level=ultra"
+          .. " class=" .. tostring(responsiveMode)
+          .. " slot=" .. tostring(slotW) .. "x" .. tostring(slotH)
+          .. " configuredModules=" .. tostring(maxCount)
+      )
+      lastOverviewUltraDegradationLogKey = degradationKey
+    end
+  end
 
   for count = maxCount, 1, -1 do
     for _, spacingScale in ipairs(reductionScales) do
@@ -1429,7 +1482,13 @@ local function chooseOverviewStackLayout(slotW, slotH, configuredModuleCount)
 
         if not reactorOnlyFallback then
           layout.fallbackReason = layout.selectionReason
-            or (responsiveMode == "micro" and "micro_constraint" or "pair_unavailable")
+            or (
+              (responsiveMode == "micro"
+                or responsiveMode == "ultra_compact_5x4_ou_6x4"
+                or responsiveMode == "ultra_compact_4x4")
+                and "micro_constraint"
+              or "pair_unavailable"
+            )
           reactorOnlyFallback = layout
         end
       end

@@ -116,6 +116,12 @@ local function resolveResponsiveFactor(args)
   end
 
   local mode = tostring(args and args.responsiveMode or "")
+  if mode == "ultra_compact_4x4" then
+    return 0.34
+  end
+  if mode == "ultra_compact_5x4_ou_6x4" then
+    return 0.48
+  end
   if mode == "micro" then
     return 0.62
   end

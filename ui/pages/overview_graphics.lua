@@ -45,8 +45,18 @@ end
 
 local function resolveResponsiveMode(ui, responsiveOptions)
   local mode = responsiveOptions and responsiveOptions.responsiveMode
-  if mode == "large" or mode == "compact" or mode == "micro" then
+  if mode == "large"
+    or mode == "compact"
+    or mode == "micro"
+    or mode == "ultra_compact_5x4_ou_6x4"
+    or mode == "ultra_compact_4x4" then
     return mode
+  end
+  if ui and (ui.overviewResponsiveMode == "ultra_compact_5x4_ou_6x4" or ui.overviewResponsiveMode == "ultra_compact_4x4") then
+    return ui.overviewResponsiveMode
+  end
+  if ui and (ui.overviewScreenClass == "ultra_compact_5x4_ou_6x4" or ui.overviewScreenClass == "ultra_compact_4x4") then
+    return ui.overviewScreenClass
   end
   if ui and ui.micro then
     return "micro"
@@ -58,6 +68,12 @@ local function resolveResponsiveMode(ui, responsiveOptions)
 end
 
 local function resolveResponsiveFactor(mode)
+  if mode == "ultra_compact_4x4" then
+    return 0.34, "survival"
+  end
+  if mode == "ultra_compact_5x4_ou_6x4" then
+    return 0.48, "ultra"
+  end
   if mode == "micro" then
     return 0.62, "minimal"
   end
@@ -239,6 +255,15 @@ local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX
   local _ = drawTextCenter
   local profile = resolveAnnotationProfile(ui, slotW, slotH)
   if not profile.enabled then
+    if profile.reason == "ultra_compact_callouts_disabled" then
+      appendRuntimeLogOnce(
+        args,
+        "overview_callouts_ultra_disabled",
+        tostring(profile.mode or "unknown"),
+        "callouts disabled for ultra compact"
+          .. " mode=" .. tostring(profile.mode or "unknown")
+      )
+    end
     return
   end
 
@@ -483,6 +508,15 @@ function M.drawImageStack(args)
     "overview degradation: effects=" .. tostring(responsiveEffectLevel)
       .. " responsiveFactor=" .. string.format("%.2f", responsiveFactor)
   )
+  if responsiveMode == "ultra_compact_5x4_ou_6x4" or responsiveMode == "ultra_compact_4x4" then
+    appendRuntimeLogOnce(
+      args,
+      "overview_layout_degradation_ultra",
+      tostring(responsiveMode),
+      "layout degradation level=ultra"
+        .. " class=" .. tostring(responsiveMode)
+    )
+  end
 
   local configuredModuleCount = math.max(1, tonumber(control.laserModuleCount) or 1)
   local layout = forcedLayout

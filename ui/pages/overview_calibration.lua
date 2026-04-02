@@ -52,6 +52,30 @@ local STACK_PROFILES = {
     maxWFill = 0.88,
     maxHFill = 0.84,
   },
+  ultra_compact_5x4_ou_6x4 = {
+    moduleGapMul = 0.26,
+    reactorGapMul = 0.95,
+    stackOffsetY = 0,
+    moduleOffsetX = 0,
+    reactorOffsetX = 0,
+    topPad = 1,
+    bottomPad = 1,
+    sidePad = 0,
+    maxWFill = 0.98,
+    maxHFill = 0.97,
+  },
+  ultra_compact_4x4 = {
+    moduleGapMul = 0.16,
+    reactorGapMul = 0.70,
+    stackOffsetY = 0,
+    moduleOffsetX = 0,
+    reactorOffsetX = 0,
+    topPad = 0,
+    bottomPad = 0,
+    sidePad = 0,
+    maxWFill = 1.00,
+    maxHFill = 1.00,
+  },
 }
 
 local ANNOTATION_PROFILES = {
@@ -189,13 +213,25 @@ local PORT_CHANNELS = {
 
 function M.resolveMode(ui)
   if type(ui) == "table" then
+    local explicitClass = tostring(ui.overviewScreenClass or "")
+    if explicitClass == "ultra_compact_5x4_ou_6x4" or explicitClass == "ultra_compact_4x4" then
+      return explicitClass
+    end
+    local responsiveMode = tostring(ui.overviewResponsiveMode or "")
+    if responsiveMode == "ultra_compact_5x4_ou_6x4" or responsiveMode == "ultra_compact_4x4" then
+      return responsiveMode
+    end
     if ui.micro then
       return "micro"
     end
     if ui.compact then
       return "compact"
     end
-  elseif ui == "micro" or ui == "compact" or ui == "large" then
+  elseif ui == "micro"
+    or ui == "compact"
+    or ui == "large"
+    or ui == "ultra_compact_5x4_ou_6x4"
+    or ui == "ultra_compact_4x4" then
     return ui
   end
   return "large"
@@ -208,10 +244,19 @@ end
 
 function M.resolveAnnotationProfile(ui, slotW, slotH)
   local mode = M.resolveMode(ui)
+  if mode == "ultra_compact_5x4_ou_6x4" or mode == "ultra_compact_4x4" then
+    return {
+      enabled = false,
+      mode = mode,
+      reason = "ultra_compact_callouts_disabled",
+    }
+  end
+
   if slotW < 86 or slotH < 86 then
     return {
       enabled = false,
       mode = mode,
+      reason = "viewport_too_small",
     }
   end
 
