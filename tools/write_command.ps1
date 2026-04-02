@@ -6,15 +6,44 @@ param(
   [string]$Computer = "",
   [string]$ExpectedVersion = "",
   [string]$OutputRoot = "tools/terrain_bridge/data/commands",
-  [string]$FusionConfigPath = "fusion_config.lua"
+  [string]$FusionConfigPath = "fusion_config.lua",
+  [string]$BridgeActivityPath = "tools/terrain_bridge/data/activity.json"
 )
 
 $ErrorActionPreference = "Stop"
 
+function Resolve-ComputerFromBridgeActivity {
+  param(
+    [string]$ActivityPath
+  )
+
+  if (-not (Test-Path -LiteralPath $ActivityPath)) {
+    return $null
+  }
+
+  try {
+    $json = Get-Content -Raw -LiteralPath $ActivityPath | ConvertFrom-Json
+    if ($null -ne $json -and $null -ne $json.lastCommandPoll) {
+      $candidate = [string]$json.lastCommandPoll.computer
+      if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+        return [pscustomobject]@{
+          Name = $candidate.Trim()
+          Source = "bridge_activity"
+        }
+      }
+    }
+  } catch {
+    # Fallback handled by caller.
+  }
+
+  return $null
+}
+
 function Resolve-ComputerName {
   param(
     [string]$ComputerName,
-    [string]$ConfigPath
+    [string]$ConfigPath,
+    [string]$ActivityPath
   )
 
   if (-not [string]::IsNullOrWhiteSpace($ComputerName)) {
@@ -43,6 +72,11 @@ function Resolve-ComputerName {
     } catch {
       # Fallback handled below.
     }
+  }
+
+  $bridgeResolved = Resolve-ComputerFromBridgeActivity -ActivityPath $ActivityPath
+  if ($null -ne $bridgeResolved -and -not [string]::IsNullOrWhiteSpace([string]$bridgeResolved.Name)) {
+    return $bridgeResolved
   }
 
   return [pscustomobject]@{
@@ -84,7 +118,7 @@ function Resolve-ExpectedVersion {
   }
 }
 
-$computerResolution = Resolve-ComputerName -ComputerName $Computer -ConfigPath $FusionConfigPath
+$computerResolution = Resolve-ComputerName -ComputerName $Computer -ConfigPath $FusionConfigPath -ActivityPath $BridgeActivityPath
 $resolvedComputer = [string]$computerResolution.Name
 $expectedVersionResolution = Resolve-ExpectedVersion -VersionValue $ExpectedVersion -VersionPath "fusion.version"
 $resolvedExpectedVersion = [string]$expectedVersionResolution.Value

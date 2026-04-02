@@ -13,6 +13,7 @@ Ce dossier contient le pont local PC <-> ComputerCraft pour la branche de brouil
 
 - `GET /` : ping service
 - `GET /health` : healthcheck explicite
+- `GET /activity` : dernieres activites (poll command / result / report / ack)
 - `GET /command?computer=<name>` : lecture commande courante
 - `POST /command/ack` : acquittement et suppression commande consommee
 - `POST /result` : depot resultat
@@ -38,6 +39,11 @@ Ce dossier contient le pont local PC <-> ComputerCraft pour la branche de brouil
 ```
 
 Si `-Computer` est omis, le script tente de lire `terrainAgent.computerName` dans `fusion_config.lua`, sinon retombe sur `fusion_terrain_01`.
+Resolution exacte:
+1. `-Computer` (si fourni)
+2. `terrainAgent.computerName` depuis `fusion_config.lua` (si non vide)
+3. dernier poll detecte dans `tools/terrain_bridge/data/activity.json`
+4. fallback `fusion_terrain_01`
 
 Si `-ExpectedVersion` est omis, le script tente de lire `fusion.version`.
 
@@ -54,8 +60,10 @@ Si `-ExpectedVersion` est omis, le script tente de lire `fusion.version`.
 Checklist quand `results/reports` ne montent pas :
 
 1. `GET /health` renvoie `ok=true`.
-2. Le fichier `data/commands/<computer>.json` existe.
-3. Le daemon ComputerCraft ecrit `/terrain_agent.heartbeat`.
-4. Le daemon loggue dans `/terrain_agent.log`.
-5. Le daemon ecrit au moins `/terrain_agent.last_result.json`.
-6. Le bridge recoit des POST dans `data/results` et `data/reports`.
+2. `GET /activity` montre un `lastCommandPoll` recent pour le computer cible.
+3. Le fichier `data/commands/<computer>.json` existe.
+4. Le daemon ComputerCraft ecrit `/terrain_agent.heartbeat`.
+5. Le startup ecrit `/terrain_agent.startup.log` (raison d'activation, erreurs boot, crash runLoop).
+6. Le daemon loggue dans `/terrain_agent.log`.
+7. Le daemon ecrit au moins `/terrain_agent.last_result.json`.
+8. Le bridge recoit des POST dans `data/results` et `data/reports`.

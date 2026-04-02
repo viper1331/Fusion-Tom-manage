@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse, unquote
@@ -11,6 +13,9 @@ COMMANDS = ROOT / "commands"
 RESULTS = ROOT / "results"
 REPORTS = ROOT / "reports"
 PUBLISH = ROOT / "publish"
+LOG_FILE = ROOT / "bridge.log"
+ACTIVITY_FILE = ROOT / "activity.json"
+LOCK = threading.Lock()
 
 for path in (COMMANDS, RESULTS, REPORTS, PUBLISH):
     path.mkdir(parents=True, exist_ok=True)
@@ -28,6 +33,100 @@ def read_json(path: Path):
 def write_json(path: Path, payload):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def now_text():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def log_event(event: str, **context):
+    parts = [f"[{now_text()}]", event]
+    for key, value in context.items():
+        parts.append(f"{key}={value}")
+    line = " ".join(parts)
+    with LOCK:
+        LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with LOG_FILE.open("a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+
+
+def read_activity():
+    data = read_json(ACTIVITY_FILE)
+    if isinstance(data, dict):
+        return data
+    return {}
+
+
+def update_activity(mutator):
+    with LOCK:
+        data = read_activity()
+        if not isinstance(data.get("polls"), dict):
+            data["polls"] = {}
+        if not isinstance(data.get("results"), dict):
+            data["results"] = {}
+        if not isinstance(data.get("reports"), dict):
+            data["reports"] = {}
+        data["updatedAt"] = now_text()
+        mutator(data)
+        write_json(ACTIVITY_FILE, data)
+
+
+def record_command_poll(computer: str, command_id: str, command_name: str):
+    def mutator(data):
+        stamp = now_text()
+        data["lastCommandPoll"] = {
+            "computer": computer,
+            "id": command_id,
+            "command": command_name,
+            "at": stamp,
+        }
+        data["polls"][computer] = stamp
+
+    update_activity(mutator)
+    log_event("command_poll", computer=computer, id=command_id, command=command_name)
+
+
+def record_result(computer: str, command_id: str, status: str):
+    def mutator(data):
+        stamp = now_text()
+        data["lastResult"] = {
+            "computer": computer,
+            "id": command_id,
+            "status": status,
+            "at": stamp,
+        }
+        data["results"][computer] = stamp
+
+    update_activity(mutator)
+    log_event("result_post", computer=computer, id=command_id, status=status)
+
+
+def record_report(computer: str, label: str):
+    def mutator(data):
+        stamp = now_text()
+        data["lastReport"] = {
+            "computer": computer,
+            "label": label,
+            "at": stamp,
+        }
+        data["reports"][computer] = stamp
+
+    update_activity(mutator)
+    log_event("report_post", computer=computer, label=label)
+
+
+def record_ack(computer: str, command_id: str, ok: bool, detail: str):
+    def mutator(data):
+        data["lastAck"] = {
+            "computer": computer,
+            "id": command_id,
+            "ok": bool(ok),
+            "detail": detail,
+            "at": now_text(),
+        }
+
+    update_activity(mutator)
+    log_event("command_ack", computer=computer, id=command_id, ok=ok, detail=detail)
 
 
 def clear_command(computer: str, expected_id: str):
@@ -71,11 +170,18 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"ok": True, "service": "terrain_bridge", "status": "healthy"})
             return
 
+        if parsed.path == "/activity":
+            self._send_json(read_activity())
+            return
+
         if parsed.path == "/command":
             params = parse_qs(parsed.query)
             computer = params.get("computer", ["fusion_terrain_01"])[0]
             target = COMMANDS / f"{computer}.json"
             payload = read_json(target) or {"id": "", "command": "noop"}
+            command_id = str(payload.get("id", "") or "")
+            command_name = str(payload.get("command", "") or "")
+            record_command_poll(computer, command_id, command_name)
             self._send_json(payload)
             return
 
@@ -103,19 +209,23 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/result":
-            computer = payload.get("computerName", "unknown")
-            command_id = payload.get("id", "no-id")
+            computer = payload.get("computerName") or payload.get("computer") or "unknown"
+            command_id = payload.get("id") or payload.get("commandId") or "no-id"
             target = RESULTS / f"{computer}-{command_id}.json"
             write_json(target, payload)
+            status = "ok" if payload.get("ok", False) else "error"
+            record_result(str(computer), str(command_id), status)
             self._send_json({"ok": True})
             return
 
         if parsed.path == "/report":
-            computer = payload.get("computerName", "unknown")
-            label = payload.get("label", "report")
-            timestamp = payload.get("sentAt", "unknown").replace(":", "-").replace(" ", "_")
+            computer = payload.get("computerName") or payload.get("computer") or "unknown"
+            label = payload.get("label") or payload.get("kind") or "report"
+            raw_stamp = payload.get("sentAt") or payload.get("at") or "unknown"
+            timestamp = str(raw_stamp).replace(":", "-").replace(" ", "_")
             target = REPORTS / f"{computer}-{label}-{timestamp}.json"
             write_json(target, payload)
+            record_report(str(computer), str(label))
             self._send_json({"ok": True})
             return
 
@@ -124,6 +234,7 @@ class Handler(BaseHTTPRequestHandler):
             command_id = str(payload.get("id", ""))
             ok, detail = clear_command(computer, command_id)
             status = 200 if ok else 409
+            record_ack(computer, command_id, ok, detail)
             self._send_json({"ok": ok, "detail": detail, "computer": computer, "id": command_id}, status=status)
             return
 

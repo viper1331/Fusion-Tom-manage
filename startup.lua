@@ -17,6 +17,23 @@ local function mergeTable(base, extra)
   return merged
 end
 
+local function nowText()
+  local ok, value = pcall(os.date, "%Y-%m-%d %H:%M:%S")
+  if ok and type(value) == "string" and value ~= "" then
+    return value
+  end
+  return tostring(os.epoch and os.epoch("utc") or 0)
+end
+
+local function appendTerrainStartupLog(message)
+  local fh = fs.open("/terrain_agent.startup.log", "a")
+  if not fh then
+    return
+  end
+  fh.writeLine("[" .. nowText() .. "] " .. tostring(message))
+  fh.close()
+end
+
 local function resolveTerrainAgentConfig()
   local defaults = readLuaTable("terrain/agent_config.lua")
   local fusion = readLuaTable("fusion_config.lua")
@@ -33,7 +50,13 @@ end
 
 if fs.exists("terrain/boot.lua") then
   local cfg = resolveTerrainAgentConfig()
+  appendTerrainStartupLog("startup: terrain boot present, enabled=" .. tostring(cfg.enabled) .. " autoStart=" .. tostring(cfg.autoStart))
   if cfg.enabled == true and cfg.autoStart ~= false and shell and type(shell.run) == "function" then
-    shell.run("terrain/boot.lua")
+    local ok, err = pcall(shell.run, "terrain/boot.lua")
+    appendTerrainStartupLog("startup: terrain boot launch=" .. tostring(ok) .. (ok and "" or (" err=" .. tostring(err))))
+  else
+    appendTerrainStartupLog("startup: terrain daemon not launched")
   end
+else
+  appendTerrainStartupLog("startup: terrain/boot.lua missing")
 end

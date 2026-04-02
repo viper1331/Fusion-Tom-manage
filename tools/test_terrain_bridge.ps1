@@ -1,6 +1,6 @@
 param(
   [string]$BridgeBaseUrl = "http://127.0.0.1:8765",
-  [string]$Computer = "fusion_terrain_01",
+  [string]$Computer = "bridge_self_test_node",
   [string]$DataRoot = "tools/terrain_bridge/data"
 )
 
@@ -26,6 +26,7 @@ $commandPayload = Ensure-JsonResponse -Url ($BridgeBaseUrl.TrimEnd("/") + "/comm
 if ($null -eq $commandPayload) {
   throw "Bridge command endpoint returned empty payload"
 }
+$activityBefore = Ensure-JsonResponse -Url ($BridgeBaseUrl.TrimEnd("/") + "/activity")
 
 $id = [guid]::NewGuid().ToString("N")
 $resultPayload = @{
@@ -66,8 +67,17 @@ if (-not $reportFile) {
   throw "Bridge report endpoint did not persist expected report file"
 }
 
+$activityAfter = Ensure-JsonResponse -Url ($BridgeBaseUrl.TrimEnd("/") + "/activity")
+if ($null -eq $activityAfter.lastResult -or [string]::IsNullOrWhiteSpace([string]$activityAfter.lastResult.computer)) {
+  throw "Bridge activity endpoint missing lastResult after self-test"
+}
+if ($null -eq $activityAfter.lastReport -or [string]::IsNullOrWhiteSpace([string]$activityAfter.lastReport.computer)) {
+  throw "Bridge activity endpoint missing lastReport after self-test"
+}
+
 Write-Host "Terrain bridge self-test OK"
 Write-Host ("  health: " + $health.status)
 Write-Host ("  command endpoint id: " + [string]$commandPayload.id)
+Write-Host ("  activity poll computer: " + [string]$activityAfter.lastCommandPoll.computer)
 Write-Host ("  result file: " + $resultFile.FullName)
 Write-Host ("  report file: " + $reportFile.FullName)
