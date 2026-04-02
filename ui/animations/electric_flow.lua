@@ -46,7 +46,25 @@ local function pulseWave(frame, period)
   return (safePeriod - t) / half
 end
 
-local function resolveAnimationMode(data)
+local function resolveAnimationMode(data, animationContext)
+  local electric = animationContext and animationContext.electric
+  if type(electric) == "table" then
+    local state = tostring(electric.state or "")
+    if state == "off" then
+      return "offline"
+    elseif state == "idle" then
+      return "standby"
+    elseif state == "charging" then
+      return "charging"
+    elseif state == "ready" then
+      return "ready"
+    elseif state == "firing" then
+      return "firing"
+    elseif state == "running" then
+      return "running"
+    end
+  end
+
   if not data or not data.formed then
     return "offline"
   end
@@ -346,11 +364,11 @@ local function drawVerticalParticleFlow(args, spec)
 end
 
 function M.resolveMode(data)
-  return resolveAnimationMode(data)
+  return resolveAnimationMode(data, nil)
 end
 
-function M.drawModuleFlux(args, x, y, w, h, data)
-  local mode = resolveAnimationMode(data)
+function M.drawModuleFlux(args, x, y, w, h, data, animationContext)
+  local mode = resolveAnimationMode(data, animationContext)
   if mode == "offline" then
     return
   end
@@ -385,8 +403,8 @@ function M.drawModuleFlux(args, x, y, w, h, data)
   })
 end
 
-function M.drawReactorRightFlux(args, x, y, w, h, data)
-  local mode = resolveAnimationMode(data)
+function M.drawReactorRightFlux(args, x, y, w, h, data, animationContext)
+  local mode = resolveAnimationMode(data, animationContext)
   if mode == "offline" then
     return
   end
@@ -414,12 +432,12 @@ function M.drawReactorRightFlux(args, x, y, w, h, data)
   })
 end
 
-function M.drawReactorBottomFlux(args, x, y, w, h, data)
+function M.drawReactorBottomFlux(args, x, y, w, h, data, animationContext)
   if not data or not data.formed then
     return
   end
 
-  local mode = resolveAnimationMode(data)
+  local mode = resolveAnimationMode(data, animationContext)
   if mode == "offline" then
     return
   end
@@ -431,7 +449,10 @@ function M.drawReactorBottomFlux(args, x, y, w, h, data)
 
   for _, channel in ipairs(CALIBRATION.bottom.channels) do
     local enabled = false
-    if channel.key == "tritium" then
+    local gasState = animationContext and animationContext.gas and animationContext.gas[channel.key]
+    if type(gasState) == "table" then
+      enabled = gasState.open == true
+    elseif channel.key == "tritium" then
       enabled = data.readers and data.readers.tritium and data.readers.tritium.ok
     elseif channel.key == "dtFuel" then
       enabled = (tonumber(data.dtPct) or 0) > 0

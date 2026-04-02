@@ -5,6 +5,7 @@ local ReactorCoreAnimation = assert(dofile("ui/animations/reactor_core.lua"))
 local GpuSafe = assert(dofile("ui/helpers/gpu_safe.lua"))
 local CalloutRenderer = assert(dofile("ui/helpers/callout_renderer.lua"))
 local OverviewCalibration = assert(dofile("ui/pages/overview_calibration.lua"))
+local OverviewAnimationState = assert(dofile("core/runtime/overview_animation_state.lua"))
 local renderLogKeys = {}
 local lastViewportKey = nil
 
@@ -88,20 +89,20 @@ local function drawImageSafe(args, img, x, y)
   GpuSafe.drawImage(args, img, x, y)
 end
 
-local function drawModuleCableFluxAt(args, x, y, w, h, data)
-  ElectricFlowAnimation.drawModuleFlux(args, x, y, w, h, data)
+local function drawModuleCableFluxAt(args, x, y, w, h, data, animationContext)
+  ElectricFlowAnimation.drawModuleFlux(args, x, y, w, h, data, animationContext)
 end
 
-local function drawReactorRightCableFluxAt(args, x, y, w, h, data)
-  ElectricFlowAnimation.drawReactorRightFlux(args, x, y, w, h, data)
+local function drawReactorRightCableFluxAt(args, x, y, w, h, data, animationContext)
+  ElectricFlowAnimation.drawReactorRightFlux(args, x, y, w, h, data, animationContext)
 end
 
-local function drawReactorBottomGasFluxAt(args, x, y, w, h, data)
-  ElectricFlowAnimation.drawReactorBottomFlux(args, x, y, w, h, data)
+local function drawReactorBottomGasFluxAt(args, x, y, w, h, data, animationContext)
+  ElectricFlowAnimation.drawReactorBottomFlux(args, x, y, w, h, data, animationContext)
 end
 
-local function drawReactorCoreAnimationAt(args, x, y, w, h, data)
-  ReactorCoreAnimation.draw(args, x, y, w, h, data)
+local function drawReactorCoreAnimationAt(args, x, y, w, h, data, animationContext)
+  ReactorCoreAnimation.draw(args, x, y, w, h, data, animationContext)
 end
 
 local function clampValue(value, minValue, maxValue)
@@ -154,75 +155,6 @@ local function formatTemperatureLabel(profile, kind, mkValue)
   end
   return corePrefix .. valueText .. " MK"
 end
-local function resolveReaderOpenState(reader, sourcePrefix)
-  if type(reader) ~= "table" or reader.ok ~= true then
-    return nil, nil
-  end
-
-  if type(reader.active) == "boolean" then
-    return reader.active, sourcePrefix .. ".active"
-  end
-
-  if type(reader.currentRedstone) == "number" then
-    return reader.currentRedstone > 0, sourcePrefix .. ".currentRedstone"
-  end
-
-  if type(reader.redstone) == "number" then
-    return reader.redstone > 0, sourcePrefix .. ".redstone"
-  end
-
-  if type(reader.amount) == "number" then
-    return reader.amount > 0, sourcePrefix .. ".amount"
-  end
-
-  return nil, nil
-end
-
-local function resolvePortOpenState(data, key)
-  -- Inference order is intentionally stable for field diagnostics:
-  -- reader signal -> relay state -> telemetry fallback.
-  local readers = type(data) == "table" and data.readers or nil
-  local relayStates = type(data) == "table" and data.relayStates or nil
-
-  if key == "tritium" then
-    local open, source = resolveReaderOpenState(readers and readers.tritium, "reader.tritium")
-    if open ~= nil then
-      return open, source
-    end
-    if relayStates and relayStates.tritiumTank ~= nil then
-      return relayStates.tritiumTank == true, "relay.tritiumTank"
-    end
-    return (tonumber(data and data.tPct) or 0) > 0.1, "inference.tPct"
-  end
-
-  if key == "deuterium" then
-    local open, source = resolveReaderOpenState(readers and readers.deuterium, "reader.deuterium")
-    if open ~= nil then
-      return open, source
-    end
-    if relayStates and relayStates.deuteriumTank ~= nil then
-      return relayStates.deuteriumTank == true, "relay.deuteriumTank"
-    end
-    return (tonumber(data and data.dPct) or 0) > 0.1, "inference.dPct"
-  end
-
-  local open, source = resolveReaderOpenState(readers and readers.dtFuel, "reader.dtFuel")
-  if open ~= nil then
-    return open, source
-  end
-
-  local triRelay = relayStates and relayStates.tritiumTank == true
-  local deuRelay = relayStates and relayStates.deuteriumTank == true
-  if relayStates and (relayStates.tritiumTank ~= nil or relayStates.deuteriumTank ~= nil) then
-    return triRelay and deuRelay, "inference.relayPair"
-  end
-
-  local injection = tonumber(data and data.injectionRateValue) or 0
-  local dtPct = tonumber(data and data.dtPct) or 0
-  local ignited = data and data.ignited == true
-  return ((ignited and dtPct > 0.1) or injection > 0), "inference.dtPct|injection"
-end
-
 local function formatPortStatus(profile, channelKey, isOpen)
   local stateText = isOpen and profile.portStateOpen or profile.portStateClosed
   local name = profile.portNames[channelKey] or string.upper(channelKey)
@@ -237,11 +169,86 @@ local function drawCalloutLabel(args, spec)
   return CalloutRenderer.drawCalloutLabel(args, spec)
 end
 
+local function logAnimationContext(args, animationContext)
+  if type(animationContext) ~= "table" then
+    return
+  end
+
+  local core = animationContext.core or {}
+  local coreKey = table.concat({
+    tostring(core.state or "n/a"),
+    tostring(core.reason or "n/a"),
+    tostring(core.formed and "1" or "0"),
+    tostring(core.ignited and "1" or "0"),
+    tostring(math.floor((tonumber(core.plasmaMK) or 0) * 10 + 0.5) / 10),
+    tostring(core.status or "n/a"),
+    tostring(core.alerts or "n/a"),
+  }, "|")
+  appendRuntimeLogOnce(
+    args,
+    "overview_animation_core_state",
+    coreKey,
+    "animation core:"
+      .. " state=" .. tostring(core.state or "n/a")
+      .. " reason=" .. tostring(core.reason or "n/a")
+      .. " formed=" .. tostring(core.formed == true)
+      .. " ignited=" .. tostring(core.ignited == true)
+      .. " plasmaMK=" .. string.format("%.1f", tonumber(core.plasmaMK) or 0)
+      .. " status=" .. tostring(core.status or "n/a")
+      .. " alerts=" .. tostring(core.alerts or "n/a")
+  )
+
+  local gas = animationContext.gas or {}
+  local tri = gas.tritium or {}
+  local dt = gas.dtFuel or {}
+  local deu = gas.deuterium or {}
+  local gasKey = table.concat({
+    tostring(tri.open and "1" or "0"),
+    tostring(tri.source or "n/a"),
+    tostring(dt.open and "1" or "0"),
+    tostring(dt.source or "n/a"),
+    tostring(deu.open and "1" or "0"),
+    tostring(deu.source or "n/a"),
+  }, "|")
+  appendRuntimeLogOnce(
+    args,
+    "overview_animation_gas_state",
+    gasKey,
+    "animation gas:"
+      .. " tritium=" .. tostring(tri.open and "open" or "closed")
+      .. " source=" .. tostring(tri.source or "n/a")
+      .. " dtFuel=" .. tostring(dt.open and "open" or "closed")
+      .. " source=" .. tostring(dt.source or "n/a")
+      .. " deuterium=" .. tostring(deu.open and "open" or "closed")
+      .. " source=" .. tostring(deu.source or "n/a")
+  )
+
+  local electric = animationContext.electric or {}
+  local electricKey = table.concat({
+    tostring(electric.state or "n/a"),
+    tostring(electric.reason or "n/a"),
+    tostring(math.floor((tonumber(electric.energyPct) or 0) + 0.5)),
+    tostring(math.floor((tonumber(electric.amplifierPct) or 0) * 100 + 0.5)),
+    tostring(electric.laserReady and "1" or "0"),
+  }, "|")
+  appendRuntimeLogOnce(
+    args,
+    "overview_animation_electric_state",
+    electricKey,
+    "animation electric:"
+      .. " state=" .. tostring(electric.state or "n/a")
+      .. " reason=" .. tostring(electric.reason or "n/a")
+      .. " energyPct=" .. string.format("%.1f", tonumber(electric.energyPct) or 0)
+      .. " amplifierPct=" .. string.format("%.2f", tonumber(electric.amplifierPct) or 0)
+      .. " laserReady=" .. tostring(electric.laserReady == true)
+  )
+end
+
 local function resolveAnnotationProfile(ui, slotW, slotH)
   return OverviewCalibration.resolveAnnotationProfile(ui, slotW, slotH)
 end
 
-local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX, slotY, slotW, slotH, reactorX, reactorY, reactorW, reactorH, data, responsiveOptions)
+local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX, slotY, slotW, slotH, reactorX, reactorY, reactorW, reactorH, data, animationContext, responsiveOptions)
   local ui = args.ui
   local _ = drawTextCenter
   local profile = resolveAnnotationProfile(ui, slotW, slotH)
@@ -351,7 +358,9 @@ local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX
     local portAnchorY = reactorY + math.floor(reactorH * portProfile.anchorRatioY)
     local portElbowX = clampValue(portAnchorX + scaleSigned(portProfile.elbowDx[idx] or 0, 1), slotX + 1, slotX + slotW - 2)
     local portElbowY = clampValue(portAnchorY + scaleSigned(portProfile.elbowDy[idx] or 0, 1), slotY + 1, slotY + slotH - 2)
-    local isOpen, source = resolvePortOpenState(data, channel.key)
+    local gasState = animationContext and animationContext.gas and animationContext.gas[channel.key] or {}
+    local isOpen = gasState.open == true
+    local source = gasState.source or "n/a"
     local labelText = formatPortStatus(profile, channel.key, isOpen)
     local side = portProfile.side[idx] or "right"
 
@@ -610,6 +619,8 @@ function M.drawImageStack(args)
   local reactorVariant = layout.reactor
   local moduleVariant = layout.module
   local configuredCount = layout.configuredModuleCount or configuredModuleCount
+  local animationContext = OverviewAnimationState.resolveContext(data)
+  logAnimationContext(args, animationContext)
   local drawnModuleCount = layout.drawnModuleCount
   if drawnModuleCount == nil then
     drawnModuleCount = layout.moduleCount or configuredCount
@@ -670,7 +681,7 @@ function M.drawImageStack(args)
       local moduleX = clampValue(moduleBaseX, moduleMinX, moduleMaxX)
       local moduleY = startY + ((i - 1) * (moduleVariant.height + moduleGap))
       drawImageSafe(args, moduleVariant.image, moduleX, moduleY)
-      drawModuleCableFluxAt(args, moduleX, moduleY, moduleVariant.width, moduleVariant.height, data)
+      drawModuleCableFluxAt(args, moduleX, moduleY, moduleVariant.width, moduleVariant.height, data, animationContext)
     end
     startY = startY + modulesBlockH + reactorGap
   else
@@ -680,9 +691,9 @@ function M.drawImageStack(args)
   end
 
   drawImageSafe(args, reactorVariant.image, reactorX, startY)
-  drawReactorCoreAnimationAt(args, reactorX, startY, reactorVariant.width, reactorVariant.height, data)
-  drawReactorRightCableFluxAt(args, reactorX, startY, reactorVariant.width, reactorVariant.height, data)
-  drawReactorBottomGasFluxAt(args, reactorX, startY, reactorVariant.width, reactorVariant.height, data)
+  drawReactorCoreAnimationAt(args, reactorX, startY, reactorVariant.width, reactorVariant.height, data, animationContext)
+  drawReactorRightCableFluxAt(args, reactorX, startY, reactorVariant.width, reactorVariant.height, data, animationContext)
+  drawReactorBottomGasFluxAt(args, reactorX, startY, reactorVariant.width, reactorVariant.height, data, animationContext)
   drawSceneAnnotations(
     args,
     drawTextCenter,
@@ -696,6 +707,7 @@ function M.drawImageStack(args)
     reactorVariant.width,
     reactorVariant.height,
     data,
+    animationContext,
     {
       reservedRects = reservedRects,
       responsiveMode = responsiveMode,

@@ -62,7 +62,25 @@ local function isHighLoad(data)
   return false
 end
 
-local function resolveCoreState(data)
+local function resolveCoreState(data, animationContext)
+  local core = animationContext and animationContext.core
+  if type(core) == "table" then
+    local state = tostring(core.state or "")
+    if state == "off" then
+      return "offline"
+    elseif state == "ignition" then
+      return "ignition"
+    elseif state == "running" then
+      return "running"
+    elseif state == "high_load" then
+      return "high_load"
+    elseif state == "warning" then
+      return "warning"
+    elseif state == "scram" then
+      return "scram"
+    end
+  end
+
   if not data or not data.formed then
     return "offline"
   end
@@ -219,17 +237,17 @@ local function buildStateStyle(data, stateName, frame)
 end
 
 function M.resolveState(data)
-  return resolveCoreState(data)
+  return resolveCoreState(data, nil)
 end
 
-function M.draw(args, x, y, w, h, data)
+function M.draw(args, x, y, w, h, data, animationContext)
   local gpu = args.gpu
   if not gpu then
     return
   end
 
   local frame = (args.state and args.state.animTick) or 0
-  local coreState = resolveCoreState(data)
+  local coreState = resolveCoreState(data, animationContext)
   local style = buildStateStyle(data, coreState, frame)
   local ui = args.ui or {}
   local visual = args.state and args.state.visual

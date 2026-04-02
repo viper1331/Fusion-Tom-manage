@@ -197,25 +197,25 @@ end
 local function estimateOverviewSceneViewport()
   syncUi()
   if not ui or not ui.layout or not ui.layout.body then
-    return nil, nil
+    return 0, 0
   end
 
   local body = ui.layout.body
   if ui.micro then
     local statsH = math.max(18, math.floor(body.h * 0.10))
-    local imageH = math.max(20, body.h - statsH - ui.gap)
+    local imageH = body.h - statsH - ui.gap
     if imageH + ui.gap >= body.h then
       imageH = body.h
     end
-    return math.max(8, body.w - 2), math.max(8, imageH - 2)
+    return body.w - 2, imageH - 2
   end
 
   local alertsH = ui.compact and math.max(28, sv(34)) or math.max(34, sv(42))
-  local mainW = math.max(1, body.w)
-  local mainH = math.max(1, body.h - alertsH - ui.gap)
+  local mainW = body.w
+  local mainH = body.h - alertsH - ui.gap
   local innerW = mainW - ui.pad * 2 - 2
   local innerH = mainH - sv(40) - 2
-  return math.max(8, innerW), math.max(8, innerH)
+  return innerW, innerH
 end
 
 local function screenSizeRejectReason(sw, sh)
@@ -223,7 +223,10 @@ local function screenSizeRejectReason(sw, sh)
   local height = tonumber(sh) or 0
 
   if width <= 0 or height <= 0 then
-    return "invalid_dimensions"
+    return "zero_size"
+  end
+  if width < 8 or height < 8 then
+    return "absurd_screen_size"
   end
 
   return nil
@@ -243,7 +246,7 @@ local function viewportRejectReason(viewportW, viewportH)
   local height = tonumber(viewportH) or 0
 
   if width <= 0 or height <= 0 then
-    return "invalid_viewport"
+    return "zero_viewport"
   end
   if width < MIN_VALID_VIEWPORT_W or height < MIN_VALID_VIEWPORT_H then
     return "viewport_too_small_for_assets"
@@ -364,18 +367,23 @@ local function isTierPairCompatible(reactorTier, moduleTier)
   return math.abs(reactorIndex - moduleIndex) <= 2
 end
 
-local function resolveOverviewStackSpacing()
+local function resolveOverviewStackSpacing(options)
   syncUi()
   -- Keep a single source of truth for OVERVIEW spacing calibration.
   local profile = OverviewCalibration.resolveStackProfile(ui)
   local smallPad = ui and ui.smallPad or 0
-  local moduleGap = math.max(1, math.floor(smallPad * (profile.moduleGapMul or 0)))
-  local reactorGap = math.max(2, math.floor(smallPad * (profile.reactorGapMul or 0)))
+  local spacingScale = tonumber(options and options.spacingScale) or 1.0
+  if spacingScale <= 0 then
+    spacingScale = 1.0
+  end
+  local moduleGap = math.max(1, math.floor((smallPad * (profile.moduleGapMul or 0)) * spacingScale + 0.5))
+  local reactorGap = math.max(2, math.floor((smallPad * (profile.reactorGapMul or 0)) * spacingScale + 0.5))
+  local stackOffsetY = math.floor((profile.stackOffsetY or 0) * spacingScale + 0.5)
 
   return {
     moduleGap = moduleGap,
     reactorGap = reactorGap,
-    stackOffsetY = profile.stackOffsetY or 0,
+    stackOffsetY = stackOffsetY,
     moduleOffsetX = profile.moduleOffsetX or 0,
     reactorOffsetX = profile.reactorOffsetX or 0,
     topPad = profile.topPad or 0,
@@ -383,6 +391,7 @@ local function resolveOverviewStackSpacing()
     sidePad = profile.sidePad or 0,
     maxWFill = profile.maxWFill or 1,
     maxHFill = profile.maxHFill or 1,
+    spacingScale = spacingScale,
   }
 end
 
@@ -761,9 +770,16 @@ local function tryLoadAssets(reason)
       tostring(rejectReason),
       tostring(hadPreviousVisual and "preserve" or "none"),
     }, "|")
-    if rejectKey ~= displayState.lastInvalidViewportKey then
+    local shouldLogReject = rejectKey ~= displayState.lastInvalidViewportKey
+    if shouldLogReject then
       appendUiRuntimeLog(
-        "asset reload skipped: reason=" .. tostring(rejectReason)
+        "screen invalid: width=" .. tostring(screenW)
+          .. " height=" .. tostring(screenH)
+          .. " reason=" .. tostring(rejectReason)
+      )
+      appendUiRuntimeLog(
+        "asset reload skipped: invalid screen size"
+          .. " reason=" .. tostring(rejectReason)
           .. " screen=" .. tostring(screenW) .. "x" .. tostring(screenH)
           .. " viewport=" .. tostring(viewportW or "n/a") .. "x" .. tostring(viewportH or "n/a")
           .. " preservePrevious=" .. tostring(hadPreviousVisual and "yes" or "no")
@@ -775,8 +791,18 @@ local function tryLoadAssets(reason)
       state.visual.sceneMode = hadPreviousModule and "pair" or "reactor-only"
       state.visual.lastAssetReason = reason .. ":skip_invalid_viewport"
       state.visual.vramFallback = state.visual.vramFallback or false
+      if shouldLogReject then
+        appendUiRuntimeLog(
+          "asset scene preserved: previous "
+            .. tostring(state.visual.sceneMode or "reactor-only")
+            .. " kept"
+        )
+      end
     else
       state.visual.lastAssetReason = reason .. ":skip_invalid_viewport_no_scene"
+      if shouldLogReject then
+        appendUiRuntimeLog("asset scene preserved: none available, reload refused")
+      end
     end
     refreshVisualEffectLevel()
     return false, rejectReason
@@ -906,6 +932,7 @@ local lastLayoutFallbackRejectLogKey = nil
 local lastLayoutVisualRejectLogKey = nil
 local lastLayoutHardRejectLogKey = nil
 local lastOverviewPairReductionLogKey = nil
+local lastOverviewPairAcceptedLogKey = nil
 
 local function resolveOverviewVisualBounds(slotW, slotH, spacing)
   local sidePad = math.max(0, math.floor(spacing.sidePad or 0))
@@ -947,7 +974,7 @@ end
 local function chooseStackLayout(slotW, slotH, moduleCount, options)
   syncUi()
   options = type(options) == "table" and options or {}
-  local spacing = resolveOverviewStackSpacing()
+  local spacing = resolveOverviewStackSpacing(options)
   local visual = resolveOverviewVisualBounds(slotW, slotH, spacing)
   local gap = spacing.reactorGap
   local moduleGap = spacing.moduleGap
@@ -1047,6 +1074,7 @@ local function chooseStackLayout(slotW, slotH, moduleCount, options)
       sidePad = visual.sidePad,
       availableW = visual.availableW,
       availableH = visual.availableH,
+      spacingScale = spacing.spacingScale,
     })
 
     if moduleCount > 0 and #modules > 0 then
@@ -1076,6 +1104,7 @@ local function chooseStackLayout(slotW, slotH, moduleCount, options)
           sidePad = visual.sidePad,
           availableW = visual.availableW,
           availableH = visual.availableH,
+          spacingScale = spacing.spacingScale,
         })
       end
     end
@@ -1121,26 +1150,35 @@ local function chooseStackLayout(slotW, slotH, moduleCount, options)
     end
 
     if bestReactorCapped then
+      local fallbackReason = "pair_unavailable"
+      if hardReject then
+        fallbackReason = "hard_overflow"
+      elseif visualReject then
+        fallbackReason = responsiveMode == "micro" and "micro_constraint" or "visual_margin_cap"
+      elseif responsiveMode == "micro" then
+        fallbackReason = "micro_constraint"
+      end
       local fallbackLogKey = table.concat({
         tostring(slotW),
         tostring(slotH),
         tostring(bestReactorCapped.reactor and bestReactorCapped.reactor.name or "none"),
-        "pair_unavailable",
+        tostring(fallbackReason),
       }, "|")
       if fallbackLogKey ~= lastLayoutFallbackLogKey then
         appendUiRuntimeLog(
           "layout fallback: reactor-only selected"
             .. " mode=" .. tostring(responsiveMode)
             .. " slot=" .. tostring(slotW) .. "x" .. tostring(slotH)
-            .. " reason=pair_unavailable"
+            .. " reason=" .. tostring(fallbackReason)
         )
         lastLayoutFallbackLogKey = fallbackLogKey
       end
-      return annotateSelection(bestReactorCapped, "reactor_capped", "pair_unavailable")
+      return annotateSelection(bestReactorCapped, "reactor_capped", fallbackReason)
     end
 
     if bestReactorFit then
-      return annotateSelection(bestReactorFit, "reactor_visual_margin_cap", "pair_unavailable_visual_cap")
+      local fitReason = responsiveMode == "micro" and "micro_constraint" or "visual_margin_cap"
+      return annotateSelection(bestReactorFit, "reactor_visual_margin_cap", fitReason)
     end
   end
 
@@ -1217,6 +1255,7 @@ local function chooseStackLayout(slotW, slotH, moduleCount, options)
       sidePad = visual.sidePad,
       availableW = visual.availableW,
       availableH = visual.availableH,
+      spacingScale = spacing.spacingScale,
     }, "reactor_only_fallback", "visual_margin_cap")
   elseif fallbackReactor then
     local rejectLogKey = table.concat({
@@ -1286,49 +1325,90 @@ local function chooseStackLayout(slotW, slotH, moduleCount, options)
   return nil
 end
 
+local function reductionScalesForMode(responsiveMode)
+  if responsiveMode == "micro" then
+    return { 1.00, 0.90, 0.82, 0.74 }
+  end
+  if responsiveMode == "compact" then
+    return { 1.00, 0.92, 0.84 }
+  end
+  return { 1.00 }
+end
+
 local function chooseOverviewStackLayout(slotW, slotH, configuredModuleCount)
   syncUi()
   local maxCount = math.max(1, tonumber(configuredModuleCount) or 1)
   local reactorOnlyFallback = nil
   local responsiveMode = ui and (ui.micro and "micro" or (ui.compact and "compact" or "large")) or "large"
+  local reductionScales = reductionScalesForMode(responsiveMode)
 
   for count = maxCount, 1, -1 do
-    local layout = chooseStackLayout(slotW, slotH, count, {
-      preferPair = true,
-      responsiveMode = responsiveMode,
-    })
-    if layout and layout.reactor then
-      layout.configuredModuleCount = maxCount
-      layout.drawnModuleCount = layout.module and count or 0
+    for _, spacingScale in ipairs(reductionScales) do
+      local layout = chooseStackLayout(slotW, slotH, count, {
+        preferPair = true,
+        responsiveMode = responsiveMode,
+        spacingScale = spacingScale,
+      })
+      if layout and layout.reactor then
+        layout.configuredModuleCount = maxCount
+        layout.drawnModuleCount = layout.module and count or 0
+        layout.spacingScale = spacingScale
 
-      if layout.module then
-        if count < maxCount then
-          local reductionLogKey = table.concat({
-            tostring(slotW),
-            tostring(slotH),
-            tostring(maxCount),
-            tostring(count),
-            tostring(layout.reactor and layout.reactor.name or "none"),
-            tostring(layout.module and layout.module.name or "none"),
-          }, "|")
-          if reductionLogKey ~= lastOverviewPairReductionLogKey then
-            appendUiRuntimeLog(
-              "overview layout: pair selected with reduced modules"
-                .. " configured=" .. tostring(maxCount)
-                .. " drawn=" .. tostring(count)
-                .. " slot=" .. tostring(slotW) .. "x" .. tostring(slotH)
-                .. " reactor=" .. tostring(layout.reactor and layout.reactor.name or "none")
-                .. " module=" .. tostring(layout.module and layout.module.name or "none")
-            )
-            lastOverviewPairReductionLogKey = reductionLogKey
+        if layout.module then
+          if count < maxCount or spacingScale < 0.999 then
+            local reductionLogKey = table.concat({
+              tostring(slotW),
+              tostring(slotH),
+              tostring(maxCount),
+              tostring(count),
+              string.format("%.2f", spacingScale),
+              tostring(layout.reactor and layout.reactor.name or "none"),
+              tostring(layout.module and layout.module.name or "none"),
+            }, "|")
+            if reductionLogKey ~= lastOverviewPairReductionLogKey then
+              appendUiRuntimeLog(
+                "layout pair compact reduction applied"
+                  .. " mode=" .. tostring(responsiveMode)
+                  .. " configured=" .. tostring(maxCount)
+                  .. " drawn=" .. tostring(count)
+                  .. " spacingScale=" .. string.format("%.2f", spacingScale)
+                  .. " slot=" .. tostring(slotW) .. "x" .. tostring(slotH)
+                  .. " reactor=" .. tostring(layout.reactor and layout.reactor.name or "none")
+                  .. " module=" .. tostring(layout.module and layout.module.name or "none")
+              )
+              lastOverviewPairReductionLogKey = reductionLogKey
+            end
+          else
+            local acceptedLogKey = table.concat({
+              tostring(slotW),
+              tostring(slotH),
+              tostring(maxCount),
+              tostring(count),
+              tostring(layout.reactor and layout.reactor.name or "none"),
+              tostring(layout.module and layout.module.name or "none"),
+              tostring(responsiveMode),
+            }, "|")
+            if acceptedLogKey ~= lastOverviewPairAcceptedLogKey then
+              appendUiRuntimeLog(
+                "layout pair accepted"
+                  .. " mode=" .. tostring(responsiveMode)
+                  .. " configured=" .. tostring(maxCount)
+                  .. " drawn=" .. tostring(count)
+                  .. " slot=" .. tostring(slotW) .. "x" .. tostring(slotH)
+                  .. " reactor=" .. tostring(layout.reactor and layout.reactor.name or "none")
+                  .. " module=" .. tostring(layout.module and layout.module.name or "none")
+              )
+              lastOverviewPairAcceptedLogKey = acceptedLogKey
+            end
           end
+          return layout
         end
-        return layout
-      end
 
-      if not reactorOnlyFallback then
-        layout.fallbackReason = layout.selectionReason or "pair_unavailable"
-        reactorOnlyFallback = layout
+        if not reactorOnlyFallback then
+          layout.fallbackReason = layout.selectionReason
+            or (responsiveMode == "micro" and "micro_constraint" or "pair_unavailable")
+          reactorOnlyFallback = layout
+        end
       end
     end
   end
@@ -1357,12 +1437,12 @@ local function chooseOverviewStackLayout(slotW, slotH, configuredModuleCount)
     }, "|")
     if fallbackKey ~= lastLayoutFallbackLogKey then
       appendUiRuntimeLog(
-        "overview layout fallback: mode=reactor-only"
+        "layout fallback reactor-only reason=" .. tostring(reactorOnlyFallback.fallbackReason or "pair_unavailable")
           .. " responsiveMode=" .. tostring(responsiveMode)
-          .. " reason=" .. tostring(reactorOnlyFallback.fallbackReason or "pair_unavailable")
           .. " configuredModules=" .. tostring(maxCount)
           .. " drawnModules=0"
           .. " slot=" .. tostring(slotW) .. "x" .. tostring(slotH)
+          .. " spacingScale=" .. string.format("%.2f", tonumber(reactorOnlyFallback.spacingScale) or 1.00)
       )
       lastLayoutFallbackLogKey = fallbackKey
     end
