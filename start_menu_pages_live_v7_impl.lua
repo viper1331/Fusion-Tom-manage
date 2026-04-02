@@ -1591,6 +1591,9 @@ local function resolveOverviewVisualBounds(slotW, slotH, spacing)
 end
 
 local function shouldReplaceLayoutCandidate(current, candidate)
+  if not candidate then
+    return false
+  end
   if not current then
     return true
   end
