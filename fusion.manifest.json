@@ -1,6 +1,6 @@
 {
     "name":  "Fusion-Tom-manage",
-    "version":  "1.2.37",
+    "version":  "1.2.38",
     "channel":  "stable",
     "entrypoint":  "start.lua",
     "source":  {
@@ -8,7 +8,7 @@
                    "repo":  "Fusion-Tom-manage",
                    "branch":  "main",
                    "manifestPath":  "fusion.manifest.json",
-                   "commit":  "3da64e4bb8610141d417660136ab4e2b02c99684"
+                   "commit":  "dea505a73e6793937a7504396a17c9ae097c2240"
                },
     "integrity":  {
                       "mode":  "hash+size",
@@ -40,8 +40,8 @@
                   },
                   {
                       "path":  "fusion.version",
-                      "size":  7,
-                      "hash":  "ccd9878983c5d3f19378d58fbdf85f03bca5c17780a5d288a4cebd098188cbf0",
+                      "size":  6,
+                      "hash":  "726f9cf49a35f38ef54186d19a8767a556565e48711e8fa6d5b2895fd4472414",
                       "hashAlgo":  "sha256"
                   },
                   {
@@ -232,14 +232,14 @@
                   },
                   {
                       "path":  "ui/pages/overview_page.lua",
-                      "size":  5643,
-                      "hash":  "e245ccaf30bb4bb0d1b1306d3acedbea08375370b5fc8900ff2afa5e8b23f085",
+                      "size":  5837,
+                      "hash":  "e0a5407baf273ae9f7dd44caac16e8204cd248212e7a4cc8d9100db108008547",
                       "hashAlgo":  "sha256"
                   },
                   {
                       "path":  "ui/pages/overview_graphics.lua",
-                      "size":  27364,
-                      "hash":  "3427ad6b07d9bd90155f30eecbeb3b09270b4478cf35bec86dcf1e093e53f95f",
+                      "size":  28921,
+                      "hash":  "2ad3cb5945c94156793d65e1d4c1c44280a864999070022dc8767581946e10f5",
                       "hashAlgo":  "sha256"
                   },
                   {
@@ -280,8 +280,8 @@
                   },
                   {
                       "path":  "start_menu_pages_live_v7_impl.lua",
-                      "size":  134285,
-                      "hash":  "d7810ae992d25748af544e52b7f69492f4d978010298deb5f940bba7061955f3",
+                      "size":  143683,
+                      "hash":  "85dc1c6f7e0b8be73c74f021a51b7ca0a32a700389d32008576d5166f1228a9e",
                       "hashAlgo":  "sha256"
                   },
                   {
@@ -315,5 +315,5 @@
                       "hashAlgo":  "sha256"
                   }
               ],
-    "commit":  "3da64e4bb8610141d417660136ab4e2b02c99684"
+    "commit":  "dea505a73e6793937a7504396a17c9ae097c2240"
 }
