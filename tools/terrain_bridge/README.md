@@ -44,6 +44,7 @@ Resolution exacte:
 2. `terrainAgent.computerName` depuis `fusion_config.lua` (si non vide)
 3. dernier poll detecte dans `tools/terrain_bridge/data/activity.json`
 4. fallback `fusion_terrain_01`
+(`bridge_self_test*` et `ack_probe*` sont ignores automatiquement pour eviter les faux ciblages)
 
 Si `-ExpectedVersion` est omis, le script tente de lire `fusion.version`.
 

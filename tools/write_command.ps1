@@ -12,6 +12,32 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Test-UsableComputerName {
+  param(
+    [string]$Name
+  )
+
+  $value = [string]$Name
+  if ([string]::IsNullOrWhiteSpace($value)) {
+    return $false
+  }
+
+  $trimmed = $value.Trim().ToLowerInvariant()
+  if ($trimmed -eq "unknown") {
+    return $false
+  }
+
+  if ($trimmed.StartsWith("bridge_self_test")) {
+    return $false
+  }
+
+  if ($trimmed.StartsWith("ack_probe")) {
+    return $false
+  }
+
+  return $true
+}
+
 function Resolve-ComputerFromBridgeActivity {
   param(
     [string]$ActivityPath
@@ -25,7 +51,7 @@ function Resolve-ComputerFromBridgeActivity {
     $json = Get-Content -Raw -LiteralPath $ActivityPath | ConvertFrom-Json
     if ($null -ne $json -and $null -ne $json.lastCommandPoll) {
       $candidate = [string]$json.lastCommandPoll.computer
-      if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+      if (Test-UsableComputerName -Name $candidate) {
         return [pscustomobject]@{
           Name = $candidate.Trim()
           Source = "bridge_activity"
