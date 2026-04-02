@@ -47,12 +47,6 @@ M.RUNTIME_EXCLUDED = {
   "assets/module laser.png",
 }
 
-local DEAD_REACTOR_REFERENCES = {
-  "assets/reactor_top_small.png",
-  "assets/reactor_top_medium.png",
-  "assets/reactor_top_large.png",
-}
-
 function M.getReactorVariants()
   return cloneVariants(REACTOR_VARIANTS)
 end
@@ -67,12 +61,6 @@ function M.resolveRuntimeRegistry(args)
 
   local reactor = cloneVariants(REACTOR_VARIANTS)
   local laser = cloneVariants(LASER_MODULE_VARIANTS)
-
-  for i = 1, #DEAD_REACTOR_REFERENCES do
-    local path = DEAD_REACTOR_REFERENCES[i]
-    local fileName = string.match(path, "([^/]+)$") or path
-    log("asset registry skipped dead reference: " .. tostring(fileName))
-  end
 
   local function filterExisting(list, bucket)
     local out = {}

@@ -10,12 +10,18 @@ function M.classifyScreen(sw, sh)
   local minSide = math.min(width, height)
   local maxSide = math.max(width, height)
 
-  -- Field-oriented survival tiers for very small monitor layouts.
+  -- Runtime labels are intentionally explicit to ease field diagnostics.
   if minSide <= 170 and maxSide <= 280 then
     return "ultra_compact_4x4"
   end
-  if minSide <= 240 and maxSide <= 360 then
-    return "ultra_compact_5x4_ou_6x4"
+  if minSide <= 260 and maxSide <= 420 then
+    return "ultra_compact_5x4"
+  end
+  if minSide <= 480 and maxSide <= 560 then
+    return "compact_5x5"
+  end
+  if minSide <= 620 and maxSide <= 760 then
+    return "compact_6x5"
   end
 
   if width <= 160 or height <= 340 then
@@ -28,7 +34,7 @@ function M.classifyScreen(sw, sh)
 end
 
 function M.isUltraCompactClass(screenClass)
-  return screenClass == "ultra_compact_5x4_ou_6x4" or screenClass == "ultra_compact_4x4"
+  return screenClass == "ultra_compact_5x4" or screenClass == "ultra_compact_4x4"
 end
 
 function M.splitVertical(r, topRatio, gap)

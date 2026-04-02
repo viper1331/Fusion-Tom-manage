@@ -874,7 +874,10 @@ local function buildUI()
   local ultraCompact = ResponsiveLayout.isUltraCompactClass(screenClass)
   local ultraCompact4x4 = screenClass == "ultra_compact_4x4"
   local micro = ultraCompact or screenClass == "micro"
-  local compact = micro or screenClass == "compact"
+  local compact = micro
+    or screenClass == "compact"
+    or screenClass == "compact_6x5"
+    or screenClass == "compact_5x5"
   local overviewPriority = (state.page == "OVERVIEW")
 
   local screenClassKey = table.concat({
@@ -1374,6 +1377,7 @@ local function drawImageStack(slotX, slotY, slotW, slotH, data, forcedLayout, re
     state = state,
     gpu = gpu,
     chooseStackLayout = chooseStackLayout,
+    chooseOverviewStackLayout = chooseOverviewStackLayout,
     drawTextCenter = drawTextCenter,
     textPixelHeight = textPixelHeight,
     appendUiRuntimeLog = appendUiRuntimeLog,

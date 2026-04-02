@@ -119,8 +119,14 @@ local function resolveResponsiveFactor(args)
   if mode == "ultra_compact_4x4" then
     return 0.34
   end
-  if mode == "ultra_compact_5x4_ou_6x4" then
+  if mode == "ultra_compact_5x4" then
     return 0.48
+  end
+  if mode == "compact_5x5" then
+    return 0.72
+  end
+  if mode == "compact_6x5" then
+    return 0.84
   end
   if mode == "micro" then
     return 0.62

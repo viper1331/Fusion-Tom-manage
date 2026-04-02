@@ -48,14 +48,26 @@ local function resolveResponsiveMode(ui, responsiveOptions)
   if mode == "large"
     or mode == "compact"
     or mode == "micro"
-    or mode == "ultra_compact_5x4_ou_6x4"
+    or mode == "compact_6x5"
+    or mode == "compact_5x5"
+    or mode == "ultra_compact_5x4"
     or mode == "ultra_compact_4x4" then
     return mode
   end
-  if ui and (ui.overviewResponsiveMode == "ultra_compact_5x4_ou_6x4" or ui.overviewResponsiveMode == "ultra_compact_4x4") then
+  if ui and (
+    ui.overviewResponsiveMode == "compact_6x5"
+    or ui.overviewResponsiveMode == "compact_5x5"
+    or ui.overviewResponsiveMode == "ultra_compact_5x4"
+    or ui.overviewResponsiveMode == "ultra_compact_4x4"
+  ) then
     return ui.overviewResponsiveMode
   end
-  if ui and (ui.overviewScreenClass == "ultra_compact_5x4_ou_6x4" or ui.overviewScreenClass == "ultra_compact_4x4") then
+  if ui and (
+    ui.overviewScreenClass == "compact_6x5"
+    or ui.overviewScreenClass == "compact_5x5"
+    or ui.overviewScreenClass == "ultra_compact_5x4"
+    or ui.overviewScreenClass == "ultra_compact_4x4"
+  ) then
     return ui.overviewScreenClass
   end
   if ui and ui.micro then
@@ -71,8 +83,14 @@ local function resolveResponsiveFactor(mode)
   if mode == "ultra_compact_4x4" then
     return 0.34, "survival"
   end
-  if mode == "ultra_compact_5x4_ou_6x4" then
+  if mode == "ultra_compact_5x4" then
     return 0.48, "ultra"
+  end
+  if mode == "compact_5x5" then
+    return 0.72, "lite"
+  end
+  if mode == "compact_6x5" then
+    return 0.84, "lite"
   end
   if mode == "micro" then
     return 0.62, "minimal"
@@ -263,6 +281,22 @@ local function drawSceneAnnotations(args, drawTextCenter, textPixelHeight, slotX
         "callouts disabled for ultra compact"
           .. " mode=" .. tostring(profile.mode or "unknown")
       )
+      appendRuntimeLogOnce(
+        args,
+        "overview_callouts_reduced_ultra",
+        tostring(profile.mode or "unknown"),
+        "callouts reduced"
+          .. " mode=" .. tostring(profile.mode or "unknown")
+      )
+    elseif profile.reason == "viewport_too_small" then
+      appendRuntimeLogOnce(
+        args,
+        "overview_callouts_reduced_viewport",
+        tostring(slotW) .. "x" .. tostring(slotH),
+        "callouts reduced"
+          .. " reason=viewport_too_small"
+          .. " viewport=" .. tostring(slotW) .. "x" .. tostring(slotH)
+      )
     end
     return
   end
@@ -434,6 +468,7 @@ function M.drawImageStack(args)
   local C = args.colors
   local gpu = args.gpu
   local chooseStackLayout = args.chooseStackLayout
+  local chooseOverviewStackLayout = args.chooseOverviewStackLayout
   local drawTextCenter = args.drawTextCenter
   local textPixelHeight = args.textPixelHeight
   local sceneMode = tostring(args.sceneMode or "none")
@@ -508,7 +543,17 @@ function M.drawImageStack(args)
     "overview degradation: effects=" .. tostring(responsiveEffectLevel)
       .. " responsiveFactor=" .. string.format("%.2f", responsiveFactor)
   )
-  if responsiveMode == "ultra_compact_5x4_ou_6x4" or responsiveMode == "ultra_compact_4x4" then
+  if responsiveFactor < 0.99 then
+    appendRuntimeLogOnce(
+      args,
+      "overview_animations_degraded",
+      tostring(responsiveMode) .. "|" .. string.format("%.2f", responsiveFactor),
+      "animations degraded"
+        .. " mode=" .. tostring(responsiveMode)
+        .. " factor=" .. string.format("%.2f", responsiveFactor)
+    )
+  end
+  if responsiveMode == "ultra_compact_5x4" or responsiveMode == "ultra_compact_4x4" then
     appendRuntimeLogOnce(
       args,
       "overview_layout_degradation_ultra",
@@ -521,11 +566,16 @@ function M.drawImageStack(args)
   local configuredModuleCount = math.max(1, tonumber(control.laserModuleCount) or 1)
   local layout = forcedLayout
   if not layout or not layout.reactor then
-    -- Pair scene remains preferred. chooseStackLayout already ranks pair over reactor-only.
-    layout = chooseStackLayout(slotW, slotH, configuredModuleCount, {
-      preferPair = sceneMode == "pair",
-      responsiveMode = responsiveMode,
-    })
+    if sceneMode == "pair" and type(chooseOverviewStackLayout) == "function" then
+      layout = chooseOverviewStackLayout(slotW, slotH, configuredModuleCount)
+    end
+    if (not layout or not layout.reactor) and type(chooseStackLayout) == "function" then
+      -- Pair scene remains preferred. chooseStackLayout already ranks pair over reactor-only.
+      layout = chooseStackLayout(slotW, slotH, configuredModuleCount, {
+        preferPair = sceneMode == "pair",
+        responsiveMode = responsiveMode,
+      })
+    end
   end
 
   if (not layout or not layout.reactor)

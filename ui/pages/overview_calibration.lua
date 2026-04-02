@@ -52,7 +52,31 @@ local STACK_PROFILES = {
     maxWFill = 0.88,
     maxHFill = 0.84,
   },
-  ultra_compact_5x4_ou_6x4 = {
+  compact_6x5 = {
+    moduleGapMul = 0.40,
+    reactorGapMul = 1.92,
+    stackOffsetY = 2,
+    moduleOffsetX = 0,
+    reactorOffsetX = 0,
+    topPad = 3,
+    bottomPad = 2,
+    sidePad = 1,
+    maxWFill = 0.90,
+    maxHFill = 0.86,
+  },
+  compact_5x5 = {
+    moduleGapMul = 0.34,
+    reactorGapMul = 1.52,
+    stackOffsetY = 1,
+    moduleOffsetX = 0,
+    reactorOffsetX = 0,
+    topPad = 2,
+    bottomPad = 1,
+    sidePad = 1,
+    maxWFill = 0.93,
+    maxHFill = 0.90,
+  },
+  ultra_compact_5x4 = {
     moduleGapMul = 0.26,
     reactorGapMul = 0.95,
     stackOffsetY = 0,
@@ -214,11 +238,17 @@ local PORT_CHANNELS = {
 function M.resolveMode(ui)
   if type(ui) == "table" then
     local explicitClass = tostring(ui.overviewScreenClass or "")
-    if explicitClass == "ultra_compact_5x4_ou_6x4" or explicitClass == "ultra_compact_4x4" then
+    if explicitClass == "compact_6x5"
+      or explicitClass == "compact_5x5"
+      or explicitClass == "ultra_compact_5x4"
+      or explicitClass == "ultra_compact_4x4" then
       return explicitClass
     end
     local responsiveMode = tostring(ui.overviewResponsiveMode or "")
-    if responsiveMode == "ultra_compact_5x4_ou_6x4" or responsiveMode == "ultra_compact_4x4" then
+    if responsiveMode == "compact_6x5"
+      or responsiveMode == "compact_5x5"
+      or responsiveMode == "ultra_compact_5x4"
+      or responsiveMode == "ultra_compact_4x4" then
       return responsiveMode
     end
     if ui.micro then
@@ -230,7 +260,9 @@ function M.resolveMode(ui)
   elseif ui == "micro"
     or ui == "compact"
     or ui == "large"
-    or ui == "ultra_compact_5x4_ou_6x4"
+    or ui == "compact_6x5"
+    or ui == "compact_5x5"
+    or ui == "ultra_compact_5x4"
     or ui == "ultra_compact_4x4" then
     return ui
   end
@@ -244,7 +276,7 @@ end
 
 function M.resolveAnnotationProfile(ui, slotW, slotH)
   local mode = M.resolveMode(ui)
-  if mode == "ultra_compact_5x4_ou_6x4" or mode == "ultra_compact_4x4" then
+  if mode == "ultra_compact_5x4" or mode == "ultra_compact_4x4" then
     return {
       enabled = false,
       mode = mode,
@@ -260,7 +292,14 @@ function M.resolveAnnotationProfile(ui, slotW, slotH)
     }
   end
 
-  local profile = deepCopy(ANNOTATION_PROFILES[mode] or ANNOTATION_PROFILES.large)
+  local annotationMode = mode
+  if mode == "compact_6x5" then
+    annotationMode = "compact"
+  elseif mode == "compact_5x5" then
+    annotationMode = "micro"
+  end
+
+  local profile = deepCopy(ANNOTATION_PROFILES[annotationMode] or ANNOTATION_PROFILES.large)
   profile.enabled = true
   profile.mode = mode
   return profile

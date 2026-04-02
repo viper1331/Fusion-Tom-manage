@@ -964,6 +964,7 @@ local lastLayoutHardRejectLogKey = nil
 local lastOverviewPairReductionLogKey = nil
 local lastOverviewPairAcceptedLogKey = nil
 local lastOverviewUltraDegradationLogKey = nil
+local lastOverviewCompactLowLogKey = nil
 
 function resolveOverviewVisualBounds(slotW, slotH, spacing)
   local sidePad = math.max(0, math.floor(spacing.sidePad or 0))
@@ -1146,7 +1147,7 @@ local function chooseStackLayout(slotW, slotH, moduleCount, options)
   local preferPair = options.preferPair == true
   local responsiveMode = tostring(options.responsiveMode or (ui and (ui.micro and "micro" or (ui.compact and "compact" or "large")) or "large"))
   local constrainedMode = responsiveMode == "micro"
-    or responsiveMode == "ultra_compact_5x4_ou_6x4"
+    or responsiveMode == "ultra_compact_5x4"
     or responsiveMode == "ultra_compact_4x4"
 
   if preferPair then
@@ -1360,6 +1361,20 @@ local function chooseStackLayout(slotW, slotH, moduleCount, options)
 end
 
 local function reductionScalesForMode(responsiveMode, slotW, slotH)
+  if responsiveMode == "compact_6x5" then
+    local out = { 1.00, 0.92, 0.84, 0.76 }
+    if (tonumber(slotH) or 0) <= 360 then
+      out[#out + 1] = 0.70
+    end
+    return out
+  end
+  if responsiveMode == "compact_5x5" then
+    local out = { 0.96, 0.88, 0.80, 0.72, 0.64 }
+    if (tonumber(slotH) or 0) <= 340 then
+      out[#out + 1] = 0.58
+    end
+    return out
+  end
   if responsiveMode == "ultra_compact_4x4" then
     local out = { 0.88, 0.76, 0.66, 0.56, 0.48, 0.40, 0.34 }
     if (tonumber(slotH) or 0) <= 140 then
@@ -1367,7 +1382,7 @@ local function reductionScalesForMode(responsiveMode, slotW, slotH)
     end
     return out
   end
-  if responsiveMode == "ultra_compact_5x4_ou_6x4" then
+  if responsiveMode == "ultra_compact_5x4" then
     local out = { 1.00, 0.88, 0.78, 0.68, 0.60, 0.52, 0.46 }
     if (tonumber(slotH) or 0) <= 180 then
       out[#out + 1] = 0.40
@@ -1400,7 +1415,7 @@ local function chooseOverviewStackLayout(slotW, slotH, configuredModuleCount)
   local reactorOnlyFallback = nil
   local responsiveMode = resolveResponsiveMode()
   local reductionScales = reductionScalesForMode(responsiveMode, slotW, slotH)
-  if responsiveMode == "ultra_compact_4x4" or responsiveMode == "ultra_compact_5x4_ou_6x4" then
+  if responsiveMode == "ultra_compact_4x4" or responsiveMode == "ultra_compact_5x4" then
     local degradationKey = table.concat({
       tostring(responsiveMode),
       tostring(slotW),
@@ -1431,6 +1446,28 @@ local function chooseOverviewStackLayout(slotW, slotH, configuredModuleCount)
         layout.spacingScale = spacingScale
 
         if layout.module then
+          if slotH <= 334 and (responsiveMode == "compact_5x5" or responsiveMode == "compact_6x5" or responsiveMode == "ultra_compact_5x4" or responsiveMode == "ultra_compact_4x4") then
+            local compactLowKey = table.concat({
+              tostring(slotW),
+              tostring(slotH),
+              tostring(maxCount),
+              tostring(count),
+              string.format("%.2f", spacingScale),
+              tostring(layout.reactor and layout.reactor.name or "none"),
+              tostring(layout.module and layout.module.name or "none"),
+            }, "|")
+            if compactLowKey ~= lastOverviewCompactLowLogKey then
+              appendUiRuntimeLog(
+                "layout compact_low applied"
+                  .. " mode=" .. tostring(responsiveMode)
+                  .. " slot=" .. tostring(slotW) .. "x" .. tostring(slotH)
+                  .. " configured=" .. tostring(maxCount)
+                  .. " drawn=" .. tostring(count)
+                  .. " spacingScale=" .. string.format("%.2f", spacingScale)
+              )
+              lastOverviewCompactLowLogKey = compactLowKey
+            end
+          end
           if count < maxCount or spacingScale < 0.999 then
             local reductionLogKey = table.concat({
               tostring(slotW),
@@ -1484,7 +1521,7 @@ local function chooseOverviewStackLayout(slotW, slotH, configuredModuleCount)
           layout.fallbackReason = layout.selectionReason
             or (
               (responsiveMode == "micro"
-                or responsiveMode == "ultra_compact_5x4_ou_6x4"
+                or responsiveMode == "ultra_compact_5x4"
                 or responsiveMode == "ultra_compact_4x4")
                 and "micro_constraint"
               or "pair_unavailable"

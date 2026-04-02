@@ -101,7 +101,7 @@ local function resolveDensity(ui)
   if screenClass == "ultra_compact_4x4" then
     return 0.24
   end
-  if screenClass == "ultra_compact_5x4_ou_6x4" then
+  if screenClass == "ultra_compact_5x4" then
     return 0.34
   end
   if ui and ui.micro then
@@ -123,8 +123,14 @@ local function resolveResponsiveFactor(args)
   if mode == "ultra_compact_4x4" then
     return 0.34
   end
-  if mode == "ultra_compact_5x4_ou_6x4" then
+  if mode == "ultra_compact_5x4" then
     return 0.48
+  end
+  if mode == "compact_5x5" then
+    return 0.72
+  end
+  if mode == "compact_6x5" then
+    return 0.84
   end
   if mode == "micro" then
     return 0.62
@@ -157,7 +163,7 @@ local function effectiveDensity(args, baseDensity)
   local mode = tostring(args and args.responsiveMode or "")
   if mode == "ultra_compact_4x4" then
     minDensity = 0.10
-  elseif mode == "ultra_compact_5x4_ou_6x4" then
+  elseif mode == "ultra_compact_5x4" then
     minDensity = 0.14
   end
   return math.max(minDensity, density)
