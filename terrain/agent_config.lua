@@ -10,6 +10,8 @@ return {
   resultEndpoint = "/result",
   publishRoot = "/publish",
   computerName = "",
+  testComputerName = "",
+  primaryComputerName = "",
   autoStart = true,
   commandFile = "/terrain_agent.last_command",
   reportFile = "/terrain_agent.last_report.json",

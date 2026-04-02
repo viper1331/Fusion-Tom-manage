@@ -48,6 +48,25 @@ Resolution exacte:
 
 Si `-ExpectedVersion` est omis, le script tente de lire `fusion.version`.
 
+## Deploiement post-main double-cible
+
+Script unique (test + principal):
+
+```powershell
+./tools/deploy_post_main_dual_target.ps1 -PrimaryComputer fusion_terrain_main
+```
+
+Ce script:
+1. purge les commandes residuelles pour les deux cibles (sauf `-SkipPurge`);
+2. envoie la commande (`sync_and_test` par defaut) aux deux computers;
+3. suit les 2 `commandId`;
+4. attend les `result` et `report` pour chaque cible;
+5. echoue explicitement si un retour manque ou si un rejeu est detecte.
+
+Resolution des cibles:
+- test: `-TestComputer` > `terrainAgent.testComputerName` > `terrainAgent.computerName` > `activity.lastCommandPoll` > `fusion_terrain_01`
+- principal: `-PrimaryComputer` > `terrainAgent.primaryComputerName` (obligatoire au final)
+
 ## Boucle attendue
 
 1. publier la release locale ;

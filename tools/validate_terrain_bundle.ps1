@@ -21,6 +21,7 @@ $required = @(
   "terrain/suites/update_validation.lua",
   "terrain/suites/peripherals.lua",
   "tools/publish_local_release.ps1",
+  "tools/deploy_post_main_dual_target.ps1",
   "tools/write_command.ps1",
   "tools/start_terrain_bridge.ps1",
   "tools/test_terrain_bridge.ps1",

@@ -60,6 +60,8 @@ local defaults = {
     runtimeMode = "runtime_gated",
     hostedMarkerFile = "/terrain_agent.hosted",
     computerName = "",
+    testComputerName = "",
+    primaryComputerName = "",
     autoStart = true,
     commandAckEndpoint = "/command/ack",
     pendingReportFile = "/terrain_agent.pending_report.json",
@@ -297,6 +299,14 @@ local function stepTerrainAgent()
   end
   cfg.terrainAgent.runtimeMode = mode
   cfg.terrainAgent.computerName = prompt(cfg.terrainAgent.computerName, "Nom computer terrain (vide = auto)")
+  cfg.terrainAgent.testComputerName = prompt(
+    cfg.terrainAgent.testComputerName or cfg.terrainAgent.computerName or "",
+    "Nom computer terrain test (vide = computerName)"
+  )
+  cfg.terrainAgent.primaryComputerName = prompt(
+    cfg.terrainAgent.primaryComputerName,
+    "Nom computer terrain principal (optionnel)"
+  )
   cfg.terrainAgent.autoStart = promptBool(cfg.terrainAgent.autoStart, "Demarrer auto via startup.lua (mode daemon)")
 end
 
@@ -340,6 +350,8 @@ local function summary()
   print("Terrain poll: " .. tostring((cfg.terrainAgent and cfg.terrainAgent.pollSeconds) or 5) .. " s")
   print("Terrain mode: " .. tostring((cfg.terrainAgent and cfg.terrainAgent.runtimeMode) or "runtime_gated"))
   print("Terrain computer: " .. tostring((cfg.terrainAgent and cfg.terrainAgent.computerName) or ""))
+  print("Terrain test computer: " .. tostring((cfg.terrainAgent and cfg.terrainAgent.testComputerName) or ""))
+  print("Terrain primary computer: " .. tostring((cfg.terrainAgent and cfg.terrainAgent.primaryComputerName) or ""))
   print("Terrain auto-start: " .. tostring((cfg.terrainAgent and cfg.terrainAgent.autoStart) or false))
   print("Validation source: " .. tostring((cfg.validation and cfg.validation.overviewSource) or "terrain"))
   print("Validation scenario: " .. tostring((cfg.validation and cfg.validation.overviewScenario) or "offline"))

@@ -19,7 +19,10 @@ terrainAgent = {
   enabled = false,
   collectorBaseUrl = "http://127.0.0.1:8765",
   pollSeconds = 5,
+  runtimeMode = "runtime_gated",
   computerName = "",
+  testComputerName = "",
+  primaryComputerName = "",
   autoStart = true,
 }
 ```
@@ -36,6 +39,11 @@ Boucle terrain attendue:
 5. (optionnel) verifier le bridge local avec `powershell -ExecutionPolicy Bypass -File tools/test_terrain_bridge.ps1`.
 
 Note: `tools/write_command.ps1` resolve automatiquement le `computerName` depuis `fusion_config.lua` si l'argument `-Computer` est omis.
+
+Workflow post-main double-cible (test + principal):
+1. publication depuis `main` (`tools/publish_local_release.ps1`);
+2. lancer `tools/deploy_post_main_dual_target.ps1 -PrimaryComputer <computer_principal>`;
+3. le script purge les commandes residuelles, envoie les 2 commandes, suit les 2 IDs et echoue si un `result`/`report` manque.
 
 ## Mode secours (`rescue_update.lua`)
 

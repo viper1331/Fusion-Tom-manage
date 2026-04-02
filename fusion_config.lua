@@ -53,6 +53,8 @@ return {
     runtimeMode = "runtime_gated",
     hostedMarkerFile = "/terrain_agent.hosted",
     computerName = "",
+    testComputerName = "",
+    primaryComputerName = "",
     autoStart = true,
     commandAckEndpoint = "/command/ack",
     pendingReportFile = "/terrain_agent.pending_report.json",

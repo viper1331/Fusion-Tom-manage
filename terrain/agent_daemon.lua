@@ -42,6 +42,9 @@ local function loadConfig()
   local fusion = readLuaConfig("fusion_config.lua")
   local terrainCfg = type(fusion.terrainAgent) == "table" and fusion.terrainAgent or {}
   local cfg = merge(base, terrainCfg)
+  if (cfg.computerName == "" or cfg.computerName == nil) and cfg.testComputerName ~= nil and tostring(cfg.testComputerName) ~= "" then
+    cfg.computerName = tostring(cfg.testComputerName)
+  end
   if cfg.computerName == "" or cfg.computerName == nil then
     cfg.computerName = os.getComputerLabel() or ("computer_" .. tostring(os.getComputerID()))
   end
