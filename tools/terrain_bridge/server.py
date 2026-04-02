@@ -267,7 +267,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/command":
             params = parse_qs(parsed.query)
-            computer = params.get("computer", ["fusion_terrain_01"])[0]
+            computer = params.get("computer", ["fusion_test_01"])[0]
             target = COMMANDS / f"{computer}.json"
             payload = read_json(target) or {"id": "", "command": "noop"}
             command_id = normalize_command_id(payload.get("id", "") if isinstance(payload, dict) else "")
@@ -336,7 +336,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/command/ack":
-            computer = str(payload.get("computer", "fusion_terrain_01"))
+            computer = str(payload.get("computer", "fusion_test_01"))
             command_id = str(payload.get("id", ""))
             ok, detail = clear_command(computer, command_id)
             status = 200 if ok else 409

@@ -38,12 +38,12 @@ Ce dossier contient le pont local PC <-> ComputerCraft pour la branche de brouil
 ./tools/write_command.ps1 -Command sync_and_test
 ```
 
-Si `-Computer` est omis, le script tente de lire `terrainAgent.computerName` dans `fusion_config.lua`, sinon retombe sur `fusion_terrain_01`.
+Si `-Computer` est omis, le script tente de lire `terrainAgent.testComputerName` puis `terrainAgent.computerName` dans `fusion_config.lua`, sinon retombe sur `fusion_test_01`.
 Resolution exacte:
 1. `-Computer` (si fourni)
 2. `terrainAgent.computerName` depuis `fusion_config.lua` (si non vide)
 3. dernier poll detecte dans `tools/terrain_bridge/data/activity.json`
-4. fallback `fusion_terrain_01`
+4. fallback `fusion_test_01`
 (`bridge_self_test*` et `ack_probe*` sont ignores automatiquement pour eviter les faux ciblages)
 
 Si `-ExpectedVersion` est omis, le script tente de lire `fusion.version`.
@@ -68,8 +68,8 @@ Resolution des cibles:
 - principal: `-PrimaryComputer` > `terrainAgent.primaryComputerName`
 
 Verrou d'ambiguite:
-- les noms generiques type `computer_4` sont rejetes par le script post-main;
-- utiliser des labels explicites uniquement (`fusion_terrain_01`, `fusion_terrain_02`, ...).
+- les noms generiques `computer_<id>` sont rejetes par le script post-main;
+- les seules identites cibles autorisees sont `fusion_test_01` (test) et `fusion_primary_01` (principal).
 
 ## Boucle attendue
 

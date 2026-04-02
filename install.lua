@@ -59,9 +59,9 @@ local defaults = {
     pollSeconds = 5,
     runtimeMode = "runtime_gated",
     hostedMarkerFile = "/terrain_agent.hosted",
-    computerName = "",
-    testComputerName = "",
-    primaryComputerName = "",
+    computerName = "fusion_test_01",
+    testComputerName = "fusion_test_01",
+    primaryComputerName = "fusion_primary_01",
     autoStart = true,
     commandAckEndpoint = "/command/ack",
     pendingReportFile = "/terrain_agent.pending_report.json",
@@ -298,14 +298,17 @@ local function stepTerrainAgent()
     mode = "runtime_gated"
   end
   cfg.terrainAgent.runtimeMode = mode
-  cfg.terrainAgent.computerName = prompt(cfg.terrainAgent.computerName, "Nom computer terrain (vide = auto)")
+  cfg.terrainAgent.computerName = prompt(
+    cfg.terrainAgent.computerName,
+    "Nom computer terrain par defaut (recommande: fusion_test_01)"
+  )
   cfg.terrainAgent.testComputerName = prompt(
     cfg.terrainAgent.testComputerName or cfg.terrainAgent.computerName or "",
-    "Nom computer terrain test (vide = computerName)"
+    "Nom computer terrain test (recommande: fusion_test_01)"
   )
   cfg.terrainAgent.primaryComputerName = prompt(
     cfg.terrainAgent.primaryComputerName,
-    "Nom computer terrain principal (optionnel)"
+    "Nom computer terrain principal (recommande: fusion_primary_01)"
   )
   cfg.terrainAgent.autoStart = promptBool(cfg.terrainAgent.autoStart, "Demarrer auto via startup.lua (mode daemon)")
 end

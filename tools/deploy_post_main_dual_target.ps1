@@ -14,6 +14,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$AllowedTestComputer = "fusion_test_01"
+$AllowedPrimaryComputer = "fusion_primary_01"
 
 function Normalize-Text {
   param([string]$Value)
@@ -130,7 +132,7 @@ function Resolve-Targets {
   foreach ($candidate in $testSources) {
     if (Test-UsableComputerName -Name $candidate.Value) {
       if (Test-AmbiguousLegacyComputerName -Name $candidate.Value) {
-        throw "CONFIG::nom machine test ambigu detecte ($($candidate.Value)). Remplacer par un label explicite (ex: fusion_terrain_01)."
+        throw "CONFIG::nom machine test ambigu detecte ($($candidate.Value)). Remplacer par $AllowedTestComputer."
       }
       $resolvedTest = $candidate
       break
@@ -149,7 +151,7 @@ function Resolve-Targets {
   foreach ($candidate in $primarySources) {
     if (Test-UsableComputerName -Name $candidate.Value) {
       if (Test-AmbiguousLegacyComputerName -Name $candidate.Value) {
-        throw "CONFIG::nom machine principale ambigu detecte ($($candidate.Value)). Remplacer par un label explicite (ex: fusion_terrain_02)."
+        throw "CONFIG::nom machine principale ambigu detecte ($($candidate.Value)). Remplacer par $AllowedPrimaryComputer."
       }
       $resolvedPrimary = $candidate
       break
@@ -162,6 +164,13 @@ function Resolve-Targets {
 
   if ($resolvedPrimary.Value -eq $resolvedTest.Value) {
     throw "CONFIG::computer test et principal identiques ($($resolvedTest.Value))"
+  }
+
+  if ($resolvedTest.Value -ne $AllowedTestComputer) {
+    throw "CONFIG::machine test invalide '$($resolvedTest.Value)'. Valeur obligatoire: $AllowedTestComputer"
+  }
+  if ($resolvedPrimary.Value -ne $AllowedPrimaryComputer) {
+    throw "CONFIG::machine principale invalide '$($resolvedPrimary.Value)'. Valeur obligatoire: $AllowedPrimaryComputer"
   }
 
   return [pscustomobject]@{

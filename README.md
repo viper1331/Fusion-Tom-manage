@@ -20,9 +20,9 @@ terrainAgent = {
   collectorBaseUrl = "http://127.0.0.1:8765",
   pollSeconds = 5,
   runtimeMode = "runtime_gated",
-  computerName = "fusion_terrain_01",
-  testComputerName = "fusion_terrain_01",
-  primaryComputerName = "fusion_terrain_02",
+  computerName = "fusion_test_01",
+  testComputerName = "fusion_test_01",
+  primaryComputerName = "fusion_primary_01",
   autoStart = true,
 }
 ```
@@ -42,8 +42,8 @@ Note: `tools/write_command.ps1` resolve automatiquement le `computerName` depuis
 
 Workflow post-main double-cible (test + principal):
 1. publication depuis `main` (`tools/publish_local_release.ps1`);
-2. verifier les labels config (`fusion_terrain_01` / `fusion_terrain_02`);
-3. lancer `tools/deploy_post_main_dual_target.ps1 -TestComputer fusion_terrain_01 -PrimaryComputer fusion_terrain_02`;
+2. verifier les labels config (`fusion_test_01` / `fusion_primary_01`);
+3. lancer `tools/deploy_post_main_dual_target.ps1 -TestComputer fusion_test_01 -PrimaryComputer fusion_primary_01`;
 4. le script purge les commandes residuelles, envoie les 2 commandes, suit les 2 IDs et echoue si un `result`/`report` manque.
 
 ## Mode secours (`rescue_update.lua`)
