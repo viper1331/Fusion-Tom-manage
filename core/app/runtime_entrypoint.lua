@@ -63,6 +63,23 @@ local function runScript(path, args)
   return dofile(path)
 end
 
+local function writeHostedMarker(path, enabled)
+  if type(path) ~= "string" or path == "" then
+    return
+  end
+  if enabled then
+    local fh = fs.open(path, "w")
+    if fh then
+      fh.write(nowText())
+      fh.close()
+    end
+    return
+  end
+  if fs.exists(path) then
+    fs.delete(path)
+  end
+end
+
 function M.run(args)
   args = type(args) == "table" and args or {}
   local entrypoint = tostring(args.entrypoint or "start_menu_pages_live_v7_impl.lua")
@@ -74,6 +91,7 @@ function M.run(args)
   if terrainCfg.enabled == true and terrainCfg.runtimeMode == "runtime_gated" then
     appendStartupLog("entrypoint: runtime-gated mode active")
     local terrainDelay = math.max(1, tonumber(terrainCfg.pollSeconds) or 5)
+    local hostedMarkerPath = tostring(terrainCfg.hostedMarkerFile or "/terrain_agent.hosted")
 
     local function runFusion()
       local ok, err = pcall(runScript, entrypoint, {})
@@ -87,7 +105,9 @@ function M.run(args)
       appendStartupLog("entrypoint: terrain worker start")
       while true do
         _G.__fusionTerrainHosted = true
+        writeHostedMarker(hostedMarkerPath, true)
         local ok, bootResultOrErr = pcall(runScript, terrainBoot, {})
+        writeHostedMarker(hostedMarkerPath, false)
         _G.__fusionTerrainHosted = nil
 
         local cycleOk = (ok and bootResultOrErr ~= false)

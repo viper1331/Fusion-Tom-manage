@@ -50,7 +50,7 @@ local function resolveRuntimeMode()
 end
 
 local runtimeMode = resolveRuntimeMode()
-local hostedMode = (rawget(_G, "__fusionTerrainHosted") == true)
+local hostedMode = (rawget(_G, "__fusionTerrainHosted") == true) or fs.exists("/terrain_agent.hosted")
 if runtimeMode == "runtime_gated" and not hostedMode then
   appendBootLog("boot: runtime-gated mode without host, refusing standalone daemon start")
   return
