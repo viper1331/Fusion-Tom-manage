@@ -124,30 +124,16 @@ local function formatMkValue(value)
   return string.format("%.1f", n)
 end
 
-local function formatTemperatureLabel(profile, kind, mkValue)
+local function formatTemperatureLabel(_profile, kind, mkValue)
   local valueText = formatMkValue(mkValue)
   local casePrefix = "T" .. DEGREE_SYMBOL .. " CASE "
   local corePrefix = "T" .. DEGREE_SYMBOL .. " CORE "
 
-  if profile.mode == "micro" then
-    if kind == "case" then
-      return "C " .. valueText
-    end
-    return "P " .. valueText
-  end
-
-  if profile.mode == "compact" then
-    if kind == "case" then
-      return "CASE " .. valueText
-    end
-    return "CORE " .. valueText
-  end
-
   if valueText == "n/a" then
     if kind == "case" then
-      return profile.mode == "large" and (casePrefix .. "n/a") or "CASE n/a"
+      return casePrefix .. "n/a"
     end
-    return profile.mode == "large" and (corePrefix .. "n/a") or "CORE n/a"
+    return corePrefix .. "n/a"
   end
 
   if kind == "case" then

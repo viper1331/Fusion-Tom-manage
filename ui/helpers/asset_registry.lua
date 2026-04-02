@@ -12,6 +12,13 @@ local function cloneVariants(list)
   return out
 end
 
+local function normalizeLogger(logger)
+  if type(logger) == "function" then
+    return logger
+  end
+  return function() end
+end
+
 -- Runtime reactor tiers are trim variants from micro to large.
 -- reactor_top.png is kept as a legacy/base fallback only.
 local REACTOR_VARIANTS = {
@@ -40,12 +47,56 @@ M.RUNTIME_EXCLUDED = {
   "assets/module laser.png",
 }
 
+local DEAD_REACTOR_REFERENCES = {
+  "assets/reactor_top_small.png",
+  "assets/reactor_top_medium.png",
+  "assets/reactor_top_large.png",
+}
+
 function M.getReactorVariants()
   return cloneVariants(REACTOR_VARIANTS)
 end
 
 function M.getLaserModuleVariants()
   return cloneVariants(LASER_MODULE_VARIANTS)
+end
+
+function M.resolveRuntimeRegistry(args)
+  local fsApi = args and args.fs or fs
+  local log = normalizeLogger(args and args.log)
+
+  local reactor = cloneVariants(REACTOR_VARIANTS)
+  local laser = cloneVariants(LASER_MODULE_VARIANTS)
+
+  for i = 1, #DEAD_REACTOR_REFERENCES do
+    local path = DEAD_REACTOR_REFERENCES[i]
+    local fileName = string.match(path, "([^/]+)$") or path
+    log("asset registry skipped dead reference: " .. tostring(fileName))
+  end
+
+  local function filterExisting(list, bucket)
+    local out = {}
+    for i = 1, #list do
+      local item = list[i]
+      local path = item.path
+      if type(fsApi) == "table" and type(fsApi.exists) == "function" then
+        if fsApi.exists(path) then
+          out[#out + 1] = item
+        else
+          log("asset registry skipped missing file: " .. tostring(path))
+        end
+      else
+        out[#out + 1] = item
+      end
+    end
+    log("asset registry loaded: bucket=" .. tostring(bucket) .. " count=" .. tostring(#out))
+    return out
+  end
+
+  return {
+    reactorVariants = filterExisting(reactor, "reactor"),
+    laserModuleVariants = filterExisting(laser, "laser_module"),
+  }
 end
 
 return M

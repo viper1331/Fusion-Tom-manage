@@ -402,7 +402,9 @@ local function reactorFitsViewport(reactorVariant, viewportW, viewportH)
   if not viewportW or not viewportH then
     return true
   end
-  return reactorVariant.width <= viewportW and reactorVariant.height <= viewportH
+  local spacing = resolveOverviewStackSpacing()
+  local visual = resolveOverviewVisualBounds(viewportW, viewportH, spacing)
+  return reactorVariant.width <= visual.availableW and reactorVariant.height <= visual.availableH
 end
 
 local function pairFitsViewport(reactorVariant, moduleVariant, viewportW, viewportH)
@@ -421,10 +423,12 @@ local function pairFitsViewport(reactorVariant, moduleVariant, viewportW, viewpo
   end
 
   if not viewportW or not viewportH then
-    return true, requiredW, requiredH
+    return true, requiredW, requiredH, requiredW, requiredH
   end
-
-  return requiredW <= viewportW and requiredH <= viewportH, requiredW, requiredH
+  local spacingVisual = resolveOverviewVisualBounds(viewportW, viewportH, spacing)
+  local availableW = spacingVisual.availableW
+  local availableH = spacingVisual.availableH
+  return requiredW <= availableW and requiredH <= availableH, requiredW, requiredH, availableW, availableH
 end
 
 local function shouldReplaceReactorFallback(currentFallback, candidateFallback, preferredTier, viewportW, viewportH)
@@ -604,13 +608,15 @@ local function loadScenePair(preferredTier, viewportW, viewportH)
               local moduleSelected, moduleErrClass = tryDecodeVariant("laser_module", moduleVariant)
               local pairFailureClass = moduleErrClass
               if moduleSelected then
-                local pairFits, pairRequiredW, pairRequiredH = pairFitsViewport(reactorSelected, moduleSelected, viewportW, viewportH)
+                local pairFits, pairRequiredW, pairRequiredH, pairAvailableW, pairAvailableH =
+                  pairFitsViewport(reactorSelected, moduleSelected, viewportW, viewportH)
                 if not pairFits then
                   appendUiRuntimeLog(
                     "asset pair rejected: class=viewport_overflow"
                       .. " reactorVariant=" .. tostring(reactorVariant.name)
                       .. " moduleVariant=" .. tostring(moduleVariant.name)
                       .. " viewport=" .. tostring(viewportW or "n/a") .. "x" .. tostring(viewportH or "n/a")
+                      .. " available=" .. tostring(pairAvailableW or "n/a") .. "x" .. tostring(pairAvailableH or "n/a")
                       .. " required=" .. tostring(pairRequiredW) .. "x" .. tostring(pairRequiredH)
                   )
                   pairFailureClass = "viewport_overflow"
@@ -680,12 +686,14 @@ local function loadScenePair(preferredTier, viewportW, viewportH)
   end
 
   if reactorFallback and reactorFallback.reactor then
-    local reactorFits, reactorRequiredW, reactorRequiredH = pairFitsViewport(reactorFallback.reactor, nil, viewportW, viewportH)
+    local reactorFits, reactorRequiredW, reactorRequiredH, reactorAvailableW, reactorAvailableH =
+      pairFitsViewport(reactorFallback.reactor, nil, viewportW, viewportH)
     if not reactorFits then
       appendUiRuntimeLog(
         "asset scene: reactor fallback rejected"
           .. " class=viewport_overflow"
           .. " viewport=" .. tostring(viewportW or "n/a") .. "x" .. tostring(viewportH or "n/a")
+          .. " available=" .. tostring(reactorAvailableW or "n/a") .. "x" .. tostring(reactorAvailableH or "n/a")
           .. " required=" .. tostring(reactorRequiredW) .. "x" .. tostring(reactorRequiredH)
       )
       appendUiRuntimeLog(
@@ -1325,12 +1333,23 @@ local function chooseStackLayout(slotW, slotH, moduleCount, options)
   return nil
 end
 
-local function reductionScalesForMode(responsiveMode)
+local function reductionScalesForMode(responsiveMode, slotW, slotH)
   if responsiveMode == "micro" then
-    return { 1.00, 0.90, 0.82, 0.74 }
+    local out = { 1.00, 0.90, 0.82, 0.74 }
+    if (tonumber(slotH) or 0) <= 220 then
+      out[#out + 1] = 0.66
+    end
+    return out
   end
   if responsiveMode == "compact" then
-    return { 1.00, 0.92, 0.84 }
+    local out = { 1.00, 0.92, 0.84 }
+    if (tonumber(slotH) or 0) <= 340 then
+      out[#out + 1] = 0.76
+    end
+    if (tonumber(slotH) or 0) <= 240 then
+      out[#out + 1] = 0.68
+    end
+    return out
   end
   return { 1.00 }
 end
@@ -1340,7 +1359,7 @@ local function chooseOverviewStackLayout(slotW, slotH, configuredModuleCount)
   local maxCount = math.max(1, tonumber(configuredModuleCount) or 1)
   local reactorOnlyFallback = nil
   local responsiveMode = ui and (ui.micro and "micro" or (ui.compact and "compact" or "large")) or "large"
-  local reductionScales = reductionScalesForMode(responsiveMode)
+  local reductionScales = reductionScalesForMode(responsiveMode, slotW, slotH)
 
   for count = maxCount, 1, -1 do
     for _, spacingScale in ipairs(reductionScales) do

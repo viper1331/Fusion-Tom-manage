@@ -130,8 +130,8 @@ end
 local GPU_MODE = DEFAULTS.runtime.gpuMode
 local REFRESH_SECONDS = DEFAULTS.runtime.refreshSeconds
 local AssetRegistry = assert(dofile("ui/helpers/asset_registry.lua"))
-local ASSET_REACTOR_VARIANTS = AssetRegistry.getReactorVariants()
-local ASSET_LASER_MODULE_VARIANTS = AssetRegistry.getLaserModuleVariants()
+local ASSET_REACTOR_VARIANTS = {}
+local ASSET_LASER_MODULE_VARIANTS = {}
 
 -- === Runtime config ===
 local DEVICES = deepCopy(DEFAULTS.devices)
@@ -675,6 +675,15 @@ local function appendUiRuntimeLog(message, options)
   end
 end
 
+do
+  local registry = AssetRegistry.resolveRuntimeRegistry({
+    fs = fs,
+    log = appendUiRuntimeLog,
+  })
+  ASSET_REACTOR_VARIANTS = registry.reactorVariants or {}
+  ASSET_LASER_MODULE_VARIANTS = registry.laserModuleVariants or {}
+end
+
 local overviewSceneRuntime = OverviewSceneRuntime.create({
   fs = fs,
   gpu = gpu,
@@ -833,8 +842,8 @@ local function buildUI()
     }, "|")
     if invalidKey ~= displayState.lastInvalidScreenKey then
       appendUiRuntimeLog(
-        "screen size rejected: "
-          .. tostring(sw) .. "x" .. tostring(sh)
+        "screen invalid: width=" .. tostring(sw)
+          .. " height=" .. tostring(sh)
           .. " reason=" .. tostring(rejectReason)
           .. " action=skip_asset_reload_preserve_scene"
       )
