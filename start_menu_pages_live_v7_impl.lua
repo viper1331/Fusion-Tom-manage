@@ -199,14 +199,16 @@ local UpdateClient = assert(dofile("core/update/client.lua"))
 local UpdateApply = assert(dofile("core/update/apply.lua"))
 local ResponsiveLayout = assert(dofile("ui/helpers/layout.lua"))
 local GpuSafe = assert(dofile("ui/helpers/gpu_safe.lua"))
-local NavigationView = assert(dofile("ui/components/navigation.lua"))
-local UpdatePageView = assert(dofile("ui/pages/update_page.lua"))
-local ControlPageView = assert(dofile("ui/pages/control_page.lua"))
-local FuelPageView = assert(dofile("ui/pages/fuel_page.lua"))
-local SystemPageView = assert(dofile("ui/pages/system_page.lua"))
+local Views = {
+  Navigation = assert(dofile("ui/components/navigation.lua")),
+  Update = assert(dofile("ui/pages/update_page.lua")),
+  Control = assert(dofile("ui/pages/control_page.lua")),
+  Fuel = assert(dofile("ui/pages/fuel_page.lua")),
+  System = assert(dofile("ui/pages/system_page.lua")),
+}
 local OverviewCalibration = assert(dofile("ui/pages/overview_calibration.lua"))
-local OverviewPageView = assert(dofile("ui/pages/overview_page.lua"))
-local OverviewGraphicsView = assert(dofile("ui/pages/overview_graphics.lua"))
+Views.Overview = assert(dofile("ui/pages/overview_page.lua"))
+Views.OverviewGraphics = assert(dofile("ui/pages/overview_graphics.lua"))
 local TelemetryRuntime = assert(dofile("core/runtime/telemetry_runtime.lua"))
 local ActionRuntime = assert(dofile("core/runtime/action_runtime.lua"))
 local AppBootstrap = assert(dofile("core/app/bootstrap.lua"))
@@ -3519,7 +3521,7 @@ local function drawHeader(r, data)
 end
 
 local function drawNav(r)
-  NavigationView.draw({
+  Views.Navigation.draw({
     rect = r,
     ui = ui,
     pages = PAGES,
@@ -3614,7 +3616,7 @@ local function drawMicroOverview(r, data)
 end
 
 local function drawMicroMajPage(r, data)
-  UpdatePageView.drawMicro({
+  Views.Update.drawMicro({
     rect = r,
     data = data,
     ui = ui,
@@ -3633,7 +3635,7 @@ local function drawMicroMajPage(r, data)
 end
 
 local function drawUpdatePage(r)
-  UpdatePageView.draw({
+  Views.Update.draw({
     rect = r,
     ui = ui,
     colors = C,
@@ -3667,7 +3669,7 @@ local function drawImageStack(slotX, slotY, slotW, slotH, data, forcedLayout, re
     end
   end
 
-  OverviewGraphicsView.drawImageStack({
+  Views.OverviewGraphics.drawImageStack({
     slotX = slotX,
     slotY = slotY,
     slotW = slotW,
@@ -3701,7 +3703,7 @@ local function drawOverviewReactorLaserScene(slotX, slotY, slotW, slotH, data, l
 end
 
 local function drawOverviewPage(r, data)
-  OverviewPageView.draw({
+  Views.Overview.draw({
     rect = r,
     data = data,
     ui = ui,
@@ -3726,7 +3728,7 @@ local function drawOverviewPage(r, data)
 end
 
 local function drawControlPage(r, data)
-  ControlPageView.draw({
+  Views.Control.draw({
     rect = r,
     data = data,
     ui = ui,
@@ -3744,7 +3746,7 @@ local function drawControlPage(r, data)
 end
 
 local function drawFuelPage(r, data)
-  FuelPageView.draw({
+  Views.Fuel.draw({
     rect = r,
     data = data,
     ui = ui,
@@ -3760,7 +3762,7 @@ local function drawFuelPage(r, data)
 end
 
 local function drawSystemPage(r, data)
-  SystemPageView.draw({
+  Views.System.draw({
     rect = r,
     data = data,
     ui = ui,
