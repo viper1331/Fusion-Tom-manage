@@ -6,7 +6,6 @@ param(
   [string]$PrimaryComputer = "",
   [string]$ExpectedVersion = "",
   [string]$FusionConfigPath = "fusion_config.lua",
-  [string]$ActivityPath = "tools/terrain_bridge/data/activity.json",
   [string]$WriteCommandPath = "tools/write_command.ps1",
   [int]$TimeoutSeconds = 420,
   [int]$PollSeconds = 2,
@@ -40,6 +39,15 @@ function Test-UsableComputerName {
     return $false
   }
   return $true
+}
+
+function Test-AmbiguousLegacyComputerName {
+  param([string]$Name)
+  $value = Normalize-Text -Value $Name
+  if ([string]::IsNullOrWhiteSpace($value)) {
+    return $false
+  }
+  return ($value -match '^computer_\d+$')
 }
 
 function Read-TerrainAgentConfigBlock {
@@ -77,25 +85,6 @@ function Read-TerrainAgentConfigBlock {
   }
 }
 
-function Read-BridgeActivityComputer {
-  param([string]$Path)
-  if (-not (Test-Path -LiteralPath $Path)) {
-    return ""
-  }
-  try {
-    $json = Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json
-    if ($null -ne $json -and $null -ne $json.lastCommandPoll) {
-      $candidate = Normalize-Text -Value ([string]$json.lastCommandPoll.computer)
-      if (Test-UsableComputerName -Name $candidate) {
-        return $candidate
-      }
-    }
-  } catch {
-    return ""
-  }
-  return ""
-}
-
 function Resolve-ExpectedVersion {
   param([string]$Override)
   $override = Normalize-Text -Value $Override
@@ -126,30 +115,29 @@ function Resolve-Targets {
   param(
     [string]$TestInput,
     [string]$PrimaryInput,
-    [string]$ConfigPath,
-    [string]$ActivityFile
+    [string]$ConfigPath
   )
 
   $cfg = Read-TerrainAgentConfigBlock -ConfigPath $ConfigPath
-  $activityComputer = Read-BridgeActivityComputer -Path $ActivityFile
 
   $testSources = @(
     [pscustomobject]@{ Value = Normalize-Text -Value $TestInput; Source = "argument" },
     [pscustomobject]@{ Value = Normalize-Text -Value $cfg.testComputerName; Source = "fusion_config.terrainAgent.testComputerName" },
-    [pscustomobject]@{ Value = Normalize-Text -Value $cfg.computerName; Source = "fusion_config.terrainAgent.computerName" },
-    [pscustomobject]@{ Value = Normalize-Text -Value $activityComputer; Source = "bridge_activity.lastCommandPoll" },
-    [pscustomobject]@{ Value = "fusion_terrain_01"; Source = "default" }
+    [pscustomobject]@{ Value = Normalize-Text -Value $cfg.computerName; Source = "fusion_config.terrainAgent.computerName" }
   )
 
   $resolvedTest = $null
   foreach ($candidate in $testSources) {
     if (Test-UsableComputerName -Name $candidate.Value) {
+      if (Test-AmbiguousLegacyComputerName -Name $candidate.Value) {
+        throw "CONFIG::nom machine test ambigu detecte ($($candidate.Value)). Remplacer par un label explicite (ex: fusion_terrain_01)."
+      }
       $resolvedTest = $candidate
       break
     }
   }
   if ($null -eq $resolvedTest) {
-    throw "CONFIG::impossible de resoudre le computer de test"
+    throw "CONFIG::impossible de resoudre le computer de test (renseigner -TestComputer ou fusion_config.lua terrainAgent.testComputerName)"
   }
 
   $primarySources = @(
@@ -160,6 +148,9 @@ function Resolve-Targets {
   $resolvedPrimary = $null
   foreach ($candidate in $primarySources) {
     if (Test-UsableComputerName -Name $candidate.Value) {
+      if (Test-AmbiguousLegacyComputerName -Name $candidate.Value) {
+        throw "CONFIG::nom machine principale ambigu detecte ($($candidate.Value)). Remplacer par un label explicite (ex: fusion_terrain_02)."
+      }
       $resolvedPrimary = $candidate
       break
     }
@@ -524,7 +515,7 @@ try {
     throw "RUNTIME::bridge indisponible /health"
   }
 
-  $targets = Resolve-Targets -TestInput $TestComputer -PrimaryInput $PrimaryComputer -ConfigPath $FusionConfigPath -ActivityFile $ActivityPath
+  $targets = Resolve-Targets -TestInput $TestComputer -PrimaryInput $PrimaryComputer -ConfigPath $FusionConfigPath
   $expected = Resolve-ExpectedVersion -Override $ExpectedVersion
 
   $commandsRoot = "tools/terrain_bridge/data/commands"

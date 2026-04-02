@@ -64,8 +64,12 @@ Ce script:
 5. echoue explicitement si un retour manque ou si un rejeu est detecte.
 
 Resolution des cibles:
-- test: `-TestComputer` > `terrainAgent.testComputerName` > `terrainAgent.computerName` > `activity.lastCommandPoll` > `fusion_terrain_01`
-- principal: `-PrimaryComputer` > `terrainAgent.primaryComputerName` (obligatoire au final)
+- test: `-TestComputer` > `terrainAgent.testComputerName` > `terrainAgent.computerName`
+- principal: `-PrimaryComputer` > `terrainAgent.primaryComputerName`
+
+Verrou d'ambiguite:
+- les noms generiques type `computer_4` sont rejetes par le script post-main;
+- utiliser des labels explicites uniquement (`fusion_terrain_01`, `fusion_terrain_02`, ...).
 
 ## Boucle attendue
 
