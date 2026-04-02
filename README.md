@@ -33,6 +33,7 @@ Boucle terrain attendue:
 2. `powershell -ExecutionPolicy Bypass -File tools/publish_local_release.ps1`
 3. `powershell -ExecutionPolicy Bypass -File tools/write_command.ps1 -Command sync_and_test`
 4. le daemon terrain recupere la commande, synchronise la MAJ et publie resultats/rapports.
+5. (optionnel) verifier le bridge local avec `powershell -ExecutionPolicy Bypass -File tools/test_terrain_bridge.ps1`.
 
 Note: `tools/write_command.ps1` resolve automatiquement le `computerName` depuis `fusion_config.lua` si l'argument `-Computer` est omis.
 

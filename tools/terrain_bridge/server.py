@@ -19,12 +19,27 @@ for path in (COMMANDS, RESULTS, REPORTS, PUBLISH):
 def read_json(path: Path):
     if not path.exists():
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
 
 
 def write_json(path: Path, payload):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def clear_command(computer: str, expected_id: str):
+    target = COMMANDS / f"{computer}.json"
+    payload = read_json(target)
+    if payload is None:
+        return False, "not_found"
+    current_id = str(payload.get("id", ""))
+    if expected_id and current_id != expected_id:
+        return False, "id_mismatch"
+    target.unlink(missing_ok=True)
+    return True, "cleared"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -52,6 +67,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path == "/health":
+            self._send_json({"ok": True, "service": "terrain_bridge", "status": "healthy"})
+            return
+
         if parsed.path == "/command":
             params = parse_qs(parsed.query)
             computer = params.get("computer", ["fusion_terrain_01"])[0]
@@ -98,6 +117,14 @@ class Handler(BaseHTTPRequestHandler):
             target = REPORTS / f"{computer}-{label}-{timestamp}.json"
             write_json(target, payload)
             self._send_json({"ok": True})
+            return
+
+        if parsed.path == "/command/ack":
+            computer = str(payload.get("computer", "fusion_terrain_01"))
+            command_id = str(payload.get("id", ""))
+            ok, detail = clear_command(computer, command_id)
+            status = 200 if ok else 409
+            self._send_json({"ok": ok, "detail": detail, "computer": computer, "id": command_id}, status=status)
             return
 
         self._send_json({"ok": False, "error": "unknown_endpoint"}, status=404)

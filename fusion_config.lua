@@ -52,6 +52,9 @@ return {
     pollSeconds = 5,
     computerName = "",
     autoStart = true,
+    commandAckEndpoint = "/command/ack",
+    pendingReportFile = "/terrain_agent.pending_report.json",
+    pendingResultFile = "/terrain_agent.pending_result.json",
   },
   validation = {
     overviewSource = "terrain",

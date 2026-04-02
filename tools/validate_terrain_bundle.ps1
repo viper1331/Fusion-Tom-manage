@@ -23,6 +23,7 @@ $required = @(
   "tools/publish_local_release.ps1",
   "tools/write_command.ps1",
   "tools/start_terrain_bridge.ps1",
+  "tools/test_terrain_bridge.ps1",
   "tools/terrain_bridge/server.py",
   "startup.lua"
 )

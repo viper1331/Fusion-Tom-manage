@@ -51,8 +51,43 @@ function Resolve-ComputerName {
   }
 }
 
+function Resolve-ExpectedVersion {
+  param(
+    [string]$VersionValue,
+    [string]$VersionPath
+  )
+
+  if (-not [string]::IsNullOrWhiteSpace($VersionValue)) {
+    return [pscustomobject]@{
+      Value = $VersionValue.Trim()
+      Source = "argument"
+    }
+  }
+
+  if (Test-Path -LiteralPath $VersionPath) {
+    try {
+      $raw = (Get-Content -Raw -LiteralPath $VersionPath).Trim()
+      if (-not [string]::IsNullOrWhiteSpace($raw)) {
+        return [pscustomobject]@{
+          Value = $raw
+          Source = "fusion.version"
+        }
+      }
+    } catch {
+      # fallback below
+    }
+  }
+
+  return [pscustomobject]@{
+    Value = ""
+    Source = "empty"
+  }
+}
+
 $computerResolution = Resolve-ComputerName -ComputerName $Computer -ConfigPath $FusionConfigPath
 $resolvedComputer = [string]$computerResolution.Name
+$expectedVersionResolution = Resolve-ExpectedVersion -VersionValue $ExpectedVersion -VersionPath "fusion.version"
+$resolvedExpectedVersion = [string]$expectedVersionResolution.Value
 
 if (-not (Test-Path -LiteralPath $OutputRoot)) {
   New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
@@ -62,7 +97,7 @@ $id = [guid]::NewGuid().ToString("N")
 $payload = [pscustomobject]@{
   id = $id
   command = $Command
-  expectedVersion = $ExpectedVersion
+  expectedVersion = $resolvedExpectedVersion
   createdAt = (Get-Date).ToString("s")
 }
 
@@ -75,6 +110,6 @@ Write-Host ("command written: " + $target)
 Write-Host ("  id: " + $id)
 Write-Host ("  command: " + $Command)
 Write-Host ("  computer: " + $resolvedComputer + " (source=" + [string]$computerResolution.Source + ")")
-if ($ExpectedVersion -ne "") {
-  Write-Host ("  expectedVersion: " + $ExpectedVersion)
+if ($resolvedExpectedVersion -ne "") {
+  Write-Host ("  expectedVersion: " + $resolvedExpectedVersion + " (source=" + [string]$expectedVersionResolution.Source + ")")
 }

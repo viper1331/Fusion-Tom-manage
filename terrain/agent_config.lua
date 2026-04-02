@@ -3,6 +3,7 @@ return {
   collectorBaseUrl = "http://127.0.0.1:8765",
   pollSeconds = 5,
   commandEndpoint = "/command",
+  commandAckEndpoint = "/command/ack",
   reportEndpoint = "/report",
   resultEndpoint = "/result",
   publishRoot = "/publish",
@@ -11,5 +12,7 @@ return {
   commandFile = "/terrain_agent.last_command",
   reportFile = "/terrain_agent.last_report.json",
   resultFile = "/terrain_agent.last_result.json",
+  pendingReportFile = "/terrain_agent.pending_report.json",
+  pendingResultFile = "/terrain_agent.pending_result.json",
   heartbeatFile = "/terrain_agent.heartbeat",
 }
