@@ -3052,6 +3052,104 @@ local function performUpdateCheck(reason)
   return true, state.update.lastCheckSummary
 end
 
+local function handleValidationProgressEvent(event)
+  if type(event) ~= "table" then
+    return
+  end
+
+  local totalFilesEvent = type(event.totalFiles) == "number" and event.totalFiles or state.update.validationProgress.totalFiles
+  local completedFilesEvent = type(event.completedFiles) == "number" and event.completedFiles or state.update.validationProgress.completedFiles
+  local totalBytesExpectedEvent = type(event.totalBytesExpected) == "number" and event.totalBytesExpected or state.update.validationProgress.totalBytesExpected
+  local totalBytesCompletedEvent = type(event.totalBytesCompleted) == "number" and event.totalBytesCompleted or state.update.validationProgress.totalBytesCompleted
+  local currentPath = type(event.path) == "string" and event.path ~= "" and event.path or state.update.validationProgress.currentFile
+  local currentFileSize = 0
+  if type(event.expectedSize) == "number" then
+    currentFileSize = math.max(0, math.floor(event.expectedSize))
+  elseif type(event.receivedSize) == "number" then
+    currentFileSize = math.max(0, math.floor(event.receivedSize))
+  else
+    currentFileSize = state.update.validationProgress.currentFileSize or 0
+  end
+
+  setValidationProgress({
+    phase = UPDATE_STATUS.VALIDATING,
+    totalFiles = totalFilesEvent,
+    completedFiles = completedFilesEvent,
+    totalBytesExpected = totalBytesExpectedEvent,
+    totalBytesCompleted = totalBytesCompletedEvent,
+    currentFile = currentPath,
+    currentFileSize = currentFileSize,
+    note = type(event.event) == "string" and event.event or state.update.validationProgress.note,
+  })
+
+  local percent = math.floor((state.update.validationProgress.percent or 0) + 0.5)
+  local progressSummary = tostring(state.update.validationProgress.completedFiles or 0) .. "/" .. tostring(state.update.validationProgress.totalFiles or 0)
+    .. " files, " .. tostring(state.update.validationProgress.totalBytesCompleted or 0) .. "/" .. tostring(state.update.validationProgress.totalBytesExpected or 0)
+    .. " bytes (" .. tostring(percent) .. "%)"
+
+  if event.event == "file_start" then
+    setUpdateStatus(UPDATE_STATUS.VALIDATING, "validating hash " .. tostring(currentPath), false)
+    appendUpdateLogLine("VALIDATION file start: " .. tostring(currentPath) .. " expected=" .. tostring(currentFileSize) .. "B")
+  elseif event.event == "file_done" then
+    setUpdateStatus(UPDATE_STATUS.VALIDATING, "validated " .. tostring(progressSummary), false)
+    appendUpdateLogLine("VALIDATION progress: " .. tostring(progressSummary))
+  elseif event.event == "complete" then
+    appendUpdateLogLine("VALIDATION transfer complete: " .. tostring(progressSummary))
+  end
+end
+
+local function handleDownloadProgressEvent(event)
+  if type(event) ~= "table" then
+    return
+  end
+
+  local phase = type(event.phase) == "string" and event.phase ~= "" and event.phase or UPDATE_STATUS.DOWNLOADING
+  local totalFilesEvent = type(event.totalFiles) == "number" and event.totalFiles or state.update.downloadProgress.totalFiles
+  local completedFilesEvent = type(event.completedFiles) == "number" and event.completedFiles or state.update.downloadProgress.completedFiles
+  local totalBytesExpectedEvent = type(event.totalBytesExpected) == "number" and event.totalBytesExpected or state.update.downloadProgress.totalBytesExpected
+  local totalBytesCompletedEvent = type(event.totalBytesCompleted) == "number" and event.totalBytesCompleted or state.update.downloadProgress.totalBytesCompleted
+  local currentPath = type(event.path) == "string" and event.path ~= "" and event.path or state.update.downloadProgress.currentFile
+  local currentFileSize = 0
+  if type(event.expectedSize) == "number" then
+    currentFileSize = math.max(0, math.floor(event.expectedSize))
+  elseif type(event.receivedSize) == "number" then
+    currentFileSize = math.max(0, math.floor(event.receivedSize))
+  else
+    currentFileSize = state.update.downloadProgress.currentFileSize or 0
+  end
+
+  setDownloadProgress({
+    phase = phase,
+    totalFiles = totalFilesEvent,
+    completedFiles = completedFilesEvent,
+    totalBytesExpected = totalBytesExpectedEvent,
+    totalBytesCompleted = totalBytesCompletedEvent,
+    currentFile = currentPath,
+    currentFileSize = currentFileSize,
+    note = type(event.event) == "string" and event.event or state.update.downloadProgress.note,
+  })
+
+  local percent = math.floor((state.update.downloadProgress.percent or 0) + 0.5)
+  local progressSummary = tostring(state.update.downloadProgress.completedFiles or 0) .. "/" .. tostring(state.update.downloadProgress.totalFiles or 0)
+    .. " files, " .. tostring(state.update.downloadProgress.totalBytesCompleted or 0) .. "/" .. tostring(state.update.downloadProgress.totalBytesExpected or 0)
+    .. " bytes (" .. tostring(percent) .. "%)"
+
+  if event.event == "file_start" then
+    setUpdateStatus(UPDATE_STATUS.DOWNLOADING, "downloading " .. tostring(currentPath) .. " (" .. progressSummary .. ")", false)
+    appendUpdateLogLine("DOWNLOAD file start: " .. tostring(currentPath) .. " expected=" .. tostring(currentFileSize) .. "B url=" .. tostring(event.url or "n/a"))
+  elseif event.event == "file_done" then
+    setUpdateStatus(UPDATE_STATUS.DOWNLOADING, "downloaded " .. tostring(progressSummary), false)
+    appendUpdateLogLine("DOWNLOAD progress: " .. tostring(progressSummary))
+  elseif event.event == "complete" then
+    setUpdateStatus(UPDATE_STATUS.DOWNLOADING, "download transfer complete", false)
+    setDownloadProgress({
+      phase = UPDATE_STATUS.DOWNLOADING,
+      note = "download transfer complete",
+    })
+    appendUpdateLogLine("DOWNLOAD transfer complete: " .. tostring(progressSummary))
+  end
+end
+
 local function performUpdateDownload()
   local integrityMode = normalizeIntegrityMode(state.update.integrityMode or UPDATE_CFG.integrityMode)
   local hashValidationRequired = integrityMode ~= "size-only"
@@ -3122,59 +3220,7 @@ local function performUpdateDownload()
   appendUpdateLogLine("DOWNLOAD files planned: " .. tostring(totalFiles))
   appendUpdateLogLine("DOWNLOAD expected bytes: " .. tostring(totalExpectedBytes))
 
-  local function onDownloadProgress(event)
-    if type(event) ~= "table" then
-      return
-    end
-
-    local phase = type(event.phase) == "string" and event.phase ~= "" and event.phase or UPDATE_STATUS.DOWNLOADING
-    local totalFilesEvent = type(event.totalFiles) == "number" and event.totalFiles or state.update.downloadProgress.totalFiles
-    local completedFilesEvent = type(event.completedFiles) == "number" and event.completedFiles or state.update.downloadProgress.completedFiles
-    local totalBytesExpectedEvent = type(event.totalBytesExpected) == "number" and event.totalBytesExpected or state.update.downloadProgress.totalBytesExpected
-    local totalBytesCompletedEvent = type(event.totalBytesCompleted) == "number" and event.totalBytesCompleted or state.update.downloadProgress.totalBytesCompleted
-    local currentPath = type(event.path) == "string" and event.path ~= "" and event.path or state.update.downloadProgress.currentFile
-    local currentFileSize = 0
-    if type(event.expectedSize) == "number" then
-      currentFileSize = math.max(0, math.floor(event.expectedSize))
-    elseif type(event.receivedSize) == "number" then
-      currentFileSize = math.max(0, math.floor(event.receivedSize))
-    else
-      currentFileSize = state.update.downloadProgress.currentFileSize or 0
-    end
-
-    setDownloadProgress({
-      phase = phase,
-      totalFiles = totalFilesEvent,
-      completedFiles = completedFilesEvent,
-      totalBytesExpected = totalBytesExpectedEvent,
-      totalBytesCompleted = totalBytesCompletedEvent,
-      currentFile = currentPath,
-      currentFileSize = currentFileSize,
-      note = type(event.event) == "string" and event.event or state.update.downloadProgress.note,
-    })
-
-    local percent = math.floor((state.update.downloadProgress.percent or 0) + 0.5)
-    local progressSummary = tostring(state.update.downloadProgress.completedFiles or 0) .. "/" .. tostring(state.update.downloadProgress.totalFiles or 0)
-      .. " files, " .. tostring(state.update.downloadProgress.totalBytesCompleted or 0) .. "/" .. tostring(state.update.downloadProgress.totalBytesExpected or 0)
-      .. " bytes (" .. tostring(percent) .. "%)"
-
-    if event.event == "file_start" then
-      setUpdateStatus(UPDATE_STATUS.DOWNLOADING, "downloading " .. tostring(currentPath) .. " (" .. progressSummary .. ")", false)
-      appendUpdateLogLine("DOWNLOAD file start: " .. tostring(currentPath) .. " expected=" .. tostring(currentFileSize) .. "B url=" .. tostring(event.url or "n/a"))
-    elseif event.event == "file_done" then
-      setUpdateStatus(UPDATE_STATUS.DOWNLOADING, "downloaded " .. tostring(progressSummary), false)
-      appendUpdateLogLine("DOWNLOAD progress: " .. tostring(progressSummary))
-    elseif event.event == "complete" then
-      setUpdateStatus(UPDATE_STATUS.DOWNLOADING, "download transfer complete", false)
-      setDownloadProgress({
-        phase = UPDATE_STATUS.DOWNLOADING,
-        note = "download transfer complete",
-      })
-      appendUpdateLogLine("DOWNLOAD transfer complete: " .. tostring(progressSummary))
-    end
-  end
-
-  local downloaded, downloadErr = UpdateClient.downloadFiles(remoteSource, plannedFiles, UPDATE_TEMP_DIR, appendUpdateLogLine, onDownloadProgress)
+  local downloaded, downloadErr = UpdateClient.downloadFiles(remoteSource, plannedFiles, UPDATE_TEMP_DIR, appendUpdateLogLine, handleDownloadProgressEvent)
   if not downloaded then
     clearStagingWithLog("download failure")
     setDownloadedState(false, 0)
@@ -3196,53 +3242,7 @@ local function performUpdateDownload()
     })
     appendUpdateLogLine("VALIDATION start: files=" .. tostring(totalFiles) .. ", expectedBytes=" .. tostring(totalExpectedBytes))
 
-    local function onValidationProgress(event)
-      if type(event) ~= "table" then
-        return
-      end
-
-      local totalFilesEvent = type(event.totalFiles) == "number" and event.totalFiles or state.update.validationProgress.totalFiles
-      local completedFilesEvent = type(event.completedFiles) == "number" and event.completedFiles or state.update.validationProgress.completedFiles
-      local totalBytesExpectedEvent = type(event.totalBytesExpected) == "number" and event.totalBytesExpected or state.update.validationProgress.totalBytesExpected
-      local totalBytesCompletedEvent = type(event.totalBytesCompleted) == "number" and event.totalBytesCompleted or state.update.validationProgress.totalBytesCompleted
-      local currentPath = type(event.path) == "string" and event.path ~= "" and event.path or state.update.validationProgress.currentFile
-      local currentFileSize = 0
-      if type(event.expectedSize) == "number" then
-        currentFileSize = math.max(0, math.floor(event.expectedSize))
-      elseif type(event.receivedSize) == "number" then
-        currentFileSize = math.max(0, math.floor(event.receivedSize))
-      else
-        currentFileSize = state.update.validationProgress.currentFileSize or 0
-      end
-
-      setValidationProgress({
-        phase = UPDATE_STATUS.VALIDATING,
-        totalFiles = totalFilesEvent,
-        completedFiles = completedFilesEvent,
-        totalBytesExpected = totalBytesExpectedEvent,
-        totalBytesCompleted = totalBytesCompletedEvent,
-        currentFile = currentPath,
-        currentFileSize = currentFileSize,
-        note = type(event.event) == "string" and event.event or state.update.validationProgress.note,
-      })
-
-      local percent = math.floor((state.update.validationProgress.percent or 0) + 0.5)
-      local progressSummary = tostring(state.update.validationProgress.completedFiles or 0) .. "/" .. tostring(state.update.validationProgress.totalFiles or 0)
-        .. " files, " .. tostring(state.update.validationProgress.totalBytesCompleted or 0) .. "/" .. tostring(state.update.validationProgress.totalBytesExpected or 0)
-        .. " bytes (" .. tostring(percent) .. "%)"
-
-      if event.event == "file_start" then
-        setUpdateStatus(UPDATE_STATUS.VALIDATING, "validating hash " .. tostring(currentPath), false)
-        appendUpdateLogLine("VALIDATION file start: " .. tostring(currentPath) .. " expected=" .. tostring(currentFileSize) .. "B")
-      elseif event.event == "file_done" then
-        setUpdateStatus(UPDATE_STATUS.VALIDATING, "validated " .. tostring(progressSummary), false)
-        appendUpdateLogLine("VALIDATION progress: " .. tostring(progressSummary))
-      elseif event.event == "complete" then
-        appendUpdateLogLine("VALIDATION transfer complete: " .. tostring(progressSummary))
-      end
-    end
-
-    local validated, validationErr = UpdateClient.validateDownloadedHashes(remoteSource, plannedFiles, UPDATE_TEMP_DIR, appendUpdateLogLine, onValidationProgress)
+    local validated, validationErr = UpdateClient.validateDownloadedHashes(remoteSource, plannedFiles, UPDATE_TEMP_DIR, appendUpdateLogLine, handleValidationProgressEvent)
     if not validated then
       clearStagingWithLog("hash validation failure")
       setDownloadedState(false, 0)
