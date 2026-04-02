@@ -46,6 +46,13 @@ return {
     requireConfirmApply = true,
     autoCheckOnStartup = false,
   },
+  terrainAgent = {
+    enabled = false,
+    collectorBaseUrl = "http://127.0.0.1:8765",
+    pollSeconds = 5,
+    computerName = "",
+    autoStart = true,
+  },
   validation = {
     overviewSource = "terrain",
     overviewScenario = "offline",

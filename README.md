@@ -10,6 +10,32 @@ Interface de gestion de reacteur a fusion Mekanism pour CC:Tweaked + Tom's Perip
 Compatibilite legacy:
 - `lua start_menu_pages_live_v7.lua` reste supporte temporairement (shim vers `start.lua`).
 
+## Agent terrain (branche brouillon)
+
+La couche terrain auto-orchestree est optionnelle et se pilote via `fusion_config.lua`:
+
+```lua
+terrainAgent = {
+  enabled = false,
+  collectorBaseUrl = "http://127.0.0.1:8765",
+  pollSeconds = 5,
+  computerName = "",
+  autoStart = true,
+}
+```
+
+Comportement startup:
+- `startup.lua` lance `terrain/boot.lua` uniquement si `terrainAgent.enabled=true` et `terrainAgent.autoStart=true`.
+- si desactive, aucun daemon terrain n'est impose.
+
+Boucle terrain attendue:
+1. `powershell -ExecutionPolicy Bypass -File tools/start_terrain_bridge.ps1`
+2. `powershell -ExecutionPolicy Bypass -File tools/publish_local_release.ps1`
+3. `powershell -ExecutionPolicy Bypass -File tools/write_command.ps1 -Command sync_and_test`
+4. le daemon terrain recupere la commande, synchronise la MAJ et publie resultats/rapports.
+
+Note: `tools/write_command.ps1` resolve automatiquement le `computerName` depuis `fusion_config.lua` si l'argument `-Computer` est omis.
+
 ## Mode secours (`rescue_update.lua`)
 
 `rescue_update.lua` est un outil officiel de recuperation si l'UI principale ne demarre plus ou si la page MAJ est indisponible.
@@ -79,4 +105,4 @@ Options de config:
 3. Lancer `powershell -ExecutionPolicy Bypass -File tools/release_prepare.ps1`.
 4. Creer un commit fonctionnel (code/outillage/version).
 5. Creer un commit de release pour la synchro finale du manifest (pin commit/hash/size).
-6. Push sur `origin/main`.
+6. Push sur la branche de travail (puis integration vers `main` seulement apres validation terrain reelle).

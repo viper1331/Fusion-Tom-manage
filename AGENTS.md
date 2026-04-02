@@ -24,6 +24,19 @@ Toute itération Codex/agent doit se faire **à partir de ce dépôt** et doit s
 
 ---
 
+## Règle branche brouillon terrain
+
+Pour la phase d'intégration terrain auto-orchestrée, la branche de travail prioritaire est `codex/terrain-auto-orchestration`.
+
+Règle de promotion obligatoire:
+1. intégration et correctifs sur la branche brouillon ;
+2. validation terrain réelle (NeoForge/ComputerCraft) avec rapports exploitables ;
+3. seulement après validation terrain OK, préparation de l'intégration vers `main`.
+
+Ne jamais considérer `main` comme prêt tant que la preuve terrain n'est pas disponible.
+
+---
+
 ## Périmètre technique du projet
 
 Le projet concerne principalement :
