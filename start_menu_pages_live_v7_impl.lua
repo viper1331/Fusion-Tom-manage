@@ -129,31 +129,9 @@ end
 
 local GPU_MODE = DEFAULTS.runtime.gpuMode
 local REFRESH_SECONDS = DEFAULTS.runtime.refreshSeconds
-
--- === Assets ===
-local ASSET_REACTOR_VARIANTS = {
-  { name = "trim_micro",  path = "assets/reactor_top_trim_micro.png"  },
-  { name = "trim_tiny",   path = "assets/reactor_top_trim_tiny.png"   },
-  { name = "trim_xsmall", path = "assets/reactor_top_trim_xsmall.png" },
-  { name = "trim_small2", path = "assets/reactor_top_trim_small2.png" },
-  { name = "trim_small",  path = "assets/reactor_top_trim_small.png"  },
-  { name = "trim_medium", path = "assets/reactor_top_trim_medium.png" },
-  { name = "trim_large",  path = "assets/reactor_top_trim_large.png"  },
-  { name = "small",       path = "assets/reactor_top_small.png"       },
-  { name = "medium",      path = "assets/reactor_top_medium.png"      },
-  { name = "large",       path = "assets/reactor_top_large.png"       },
-  { name = "base",        path = "assets/reactor_top.png"             },
-}
-
-local ASSET_LASER_MODULE_VARIANTS = {
-  { name = "micro",   path = "assets/laser_module_micro.png"   },
-  { name = "tiny",    path = "assets/laser_module_tiny.png"    },
-  { name = "xsmall",  path = "assets/laser_module_xsmall.png"  },
-  { name = "small2",  path = "assets/laser_module_small2.png"  },
-  { name = "small",   path = "assets/laser_module_small.png"   },
-  { name = "medium",  path = "assets/laser_module_medium.png"  },
-  { name = "large",   path = "assets/laser_module_large.png"   },
-}
+local AssetRegistry = assert(dofile("ui/helpers/asset_registry.lua"))
+local ASSET_REACTOR_VARIANTS = AssetRegistry.getReactorVariants()
+local ASSET_LASER_MODULE_VARIANTS = AssetRegistry.getLaserModuleVariants()
 
 -- === Runtime config ===
 local DEVICES = deepCopy(DEFAULTS.devices)
